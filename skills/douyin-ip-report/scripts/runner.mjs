@@ -455,21 +455,32 @@ export function matchReceiptTargets(ids, receipts) {
 // controls are never queried. Each page must match its displayed row range.
 export async function readHistoryTable(page, type, budget = { remaining: 100 }, timeout = 15000) {
   const expectedHeaders = type === 'receipt' ? ['举报对象', '举报内容', '当前进度', '详情', '操作'] : ['举报ID', '侵权类型', '举报描述', '提交时间', '当前进度', '操作'];
+  const headersMatch = headers => type === 'receipt'
+    ? [5, 6].includes(headers.length) && headers[0] === '举报对象' && headers[1] === '举报内容'
+      && headers[2] === '当前进度' && headers.includes('详情') && headers.includes('操作')
+    : JSON.stringify(headers) === JSON.stringify(expectedHeaders);
   const parse = type === 'receipt' ? receiptRows : historyRows;
   const collected = [], seen = new Set();
   let expectedStart = 1, expectedTotal;
   while (true) {
     if (budget.remaining <= 0) return { items: collected, complete: false, stop_reason: 'page_limit', total: expectedTotal ?? null };
     const end = Date.now() + timeout;
-    let snapshot, range;
+    let snapshot, range, emptySince;
     while (Date.now() < end) {
       await assertNoChallenge(page);
       const tables = page.locator('.semi-table-container').filter({ visible: true });
       const pagination = page.locator('.semi-table-pagination-info').filter({ visible: true });
+      const empty = page.getByText(/暂无侵权举报记录|暂无举报记录/).filter({ visible: true });
+      if (type === 'history' && await tables.count() === 0 && await empty.count()) {
+        emptySince ||= Date.now();
+        if (Date.now() - emptySince > 2000) return { items: [], complete: true, total: 0 };
+      } else {
+        emptySince = undefined;
+      }
       if (await tables.count() === 1 && await pagination.count() === 1) {
         snapshot = await tables.evaluate(el => ({ headers: [...el.querySelectorAll('thead th')].map(th => th.innerText.trim()), rows: [...el.querySelectorAll('tbody tr')].map(tr => [...tr.querySelectorAll('td')].map(td => td.innerText)) }));
         try { range = paginationRange(await pagination.innerText()); } catch { range = undefined; }
-        if (range?.start === expectedStart && JSON.stringify(snapshot.headers) === JSON.stringify(expectedHeaders) && snapshot.rows.length === range.end - range.start + 1) break;
+        if (range?.start === expectedStart && headersMatch(snapshot.headers) && snapshot.rows.length === range.end - range.start + 1) break;
       }
       snapshot = undefined;
       await page.waitForTimeout(150);
