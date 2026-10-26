@@ -1,0 +1,17 @@
+.DS_Store
+node_modules/
+*.log
+*.tgz
+
+# Private runtime data — never commit
+config.json
+identity.json
+materials.json
+browser-profile/
+jobs/
+*.state.json
+*.state.json.jsonl
+
+# Python bytecode
+__pycache__/
+*.pyc

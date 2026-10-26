@@ -1,0 +1,42 @@
+{
+  "name": "dsh-douyin-ip-report",
+  "version": "0.1.0",
+  "description": "抖音专利/商标侵权举报技能包：本地资料预检、专用浏览器执行、历史回执查询（DeepSeek Harness skill plugin）",
+  "license": "MIT",
+  "type": "module",
+  "files": [
+    "cordis.patch.yml",
+    "skills",
+    "README.md",
+    "LICENSE"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-skill-filesystem": "*"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "skill",
+    "douyin",
+    "patent",
+    "trademark",
+    "infringement"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gx18391303625-afk/dsh-douyin-ip-report.git"
+  },
+  "homepage": "https://github.com/gx18391303625-afk/dsh-douyin-ip-report#readme",
+  "bugs": {
+    "url": "https://github.com/gx18391303625-afk/dsh-douyin-ip-report/issues"
+  }
+}

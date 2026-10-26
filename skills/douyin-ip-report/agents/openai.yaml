@@ -1,0 +1,4 @@
+interface:
+  display_name: "抖音侵权举报流程"
+  short_description: "按固定资料处理抖音专利与商标举报，检查链接、附件并核验提交状态"
+  default_prompt: "使用 $douyin-ip-report 检查固定资料，并处理我这次明确提供的抖音举报链接。"

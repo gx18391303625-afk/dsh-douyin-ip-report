@@ -1,0 +1,18 @@
+# dsh-douyin-ip-report bundle patch
+#
+# Registers the bundled `skills/` directory as an extra skill root, so installing
+# this plugin is what puts the Douyin complaint skill into the agent catalog.
+# `baseUrl` resolves to this package, so the path follows the install location.
+#
+# `providerName` must be unique per package: the registry rejects a second
+# provider under the same name. `includeDefaultRoots: false` keeps this provider
+# scoped to its own directory; the harness already scans the project/user roots.
+
+- insert:
+    - id: dsh-douyin-ip-report-skills
+      name: '@deepseek-ai/dsh-skill-filesystem'
+      config:
+        providerName: dsh-douyin-ip-report
+        includeDefaultRoots: false
+        customSkillDirs:
+          - !!js "process.getBuiltinModule('node:url').fileURLToPath(new URL('skills/', baseUrl))"

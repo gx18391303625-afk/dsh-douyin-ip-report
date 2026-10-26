@@ -1,0 +1,23 @@
+{
+  "patent": {
+    "template_label": "专利侵权话术",
+    "link_label": "专利侵权链接",
+    "evidence": [
+      "patent-evidence-1.jpg",
+      "patent-evidence-2.jpg",
+      "patent-evidence-3.jpg",
+      "patent-evidence-4.jpg",
+      "patent-evidence-5.jpg",
+      "patent-evidence-6.jpg"
+    ],
+    "identity_reference": "patent-identity.png",
+    "license": "patent-license.jpg"
+  },
+  "trademark": {
+    "template_label": "商标侵权话术",
+    "link_label": "商标侵权链接",
+    "evidence": ["trademark-evidence.png"],
+    "identity_reference": "trademark-identity.png",
+    "license": "trademark-license.jpg"
+  }
+}
