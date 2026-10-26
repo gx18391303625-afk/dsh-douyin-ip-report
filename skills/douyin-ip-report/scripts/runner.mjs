@@ -398,13 +398,17 @@ export function paginationRange(text) {
 }
 export function receiptRows(rows) {
   return rows.map(cells => {
-    if (!Array.isArray(cells) || cells.length !== 5 || cells.some(cell => typeof cell !== 'string')) stop('HISTORY_UNVERIFIED', 'Unexpected receipt columns.');
-    const [object, rawLink, status, detail] = cells.map(cell => cell.trim());
+    if (!Array.isArray(cells) || ![5, 6].includes(cells.length) || cells.some(cell => typeof cell !== 'string')) stop('HISTORY_UNVERIFIED', 'Unexpected receipt columns.');
+    const values = cells.map(cell => cell.trim());
+    const [object, rawLink, status] = values;
+    // Receipts that contain pending supplements add a 「补充原因」 column.
+    const reason = values.length === 6 ? values[3] : '';
+    const detail = values.length === 6 ? values[4] : values[3];
     let link;
     try { link = new URL(rawLink); } catch { stop('HISTORY_UNVERIFIED', 'A receipt row has no supported video URL.'); }
     const videoId = link.pathname.match(/^\/video\/(\d+)\/?$/)?.[1] || (link.pathname === '/jingxuan' ? link.searchParams.get('modal_id') : null);
     if (link.protocol !== 'https:' || link.hostname !== 'www.douyin.com' || link.username || link.password || link.port || !/^\d+$/.test(videoId || '') || !status) stop('HISTORY_UNVERIFIED', 'A receipt row has no verified video ID or progress.');
-    return { video_id: videoId, video_url: `https://www.douyin.com/video/${videoId}`, object, status, detail,
+    return { video_id: videoId, video_url: `https://www.douyin.com/video/${videoId}`, object, status, reason, detail,
       duplicate_submission: status === '提交失败' && /24\s*小时内.*举报过|重复举报/.test(detail) };
   });
 }
@@ -717,7 +721,11 @@ export async function selfTest(channelOptions = {}) {
     await assert.rejects(uploadSection(page, ['证明材料'], [record]), /uniquely scope/);
     await page.setContent('<section><span>证明材料</span><input type="file"></section><section><span>证明材料</span><input type="file"></section>');
     await assert.rejects(uploadSection(page, ['证明材料'], [record]), /Expected one/);
-    console.log(JSON.stringify({ status: 'tests_passed', tests: ['manifest_hash_check', 'duplicate_submission_guard', 'failed_retry_guard', 'mock_form_prepare_without_submit', 'scoped_file_upload', 'recognized_video_ids', 'explicit_failure', 'static_notice_not_failure', 'explicit_success', 'ambiguous_input_stop', 'ambiguous_section_stop', 'default_category_login', 'rich_text_multiline_readback', 'default_to_patent', 'default_to_trademark', 'unchanged_category_stop', 'ambiguous_editor_stop'], live_requests: 0 }));
+    assert.deepEqual(receiptRows([['视频/图集', 'https://www.douyin.com/video/123', '审核中', '正在审核', '查看']]).map(row => [row.reason, row.detail]),
+      [['', '正在审核']], 'Five-column receipt rows must still parse');
+    assert.deepEqual(receiptRows([['视频/图集', 'https://www.douyin.com/video/123', '待补充材料', '补充原因', '详情', '查看']]).map(row => [row.reason, row.detail]),
+      [['补充原因', '详情']], 'Six-column receipt rows with 补充原因 must parse');
+    console.log(JSON.stringify({ status: 'tests_passed', tests: ['manifest_hash_check', 'duplicate_submission_guard', 'failed_retry_guard', 'mock_form_prepare_without_submit', 'scoped_file_upload', 'recognized_video_ids', 'explicit_failure', 'static_notice_not_failure', 'explicit_success', 'ambiguous_input_stop', 'ambiguous_section_stop', 'default_category_login', 'rich_text_multiline_readback', 'default_to_patent', 'default_to_trademark', 'unchanged_category_stop', 'ambiguous_editor_stop', 'receipt_columns'], live_requests: 0 }));
   } finally { if (browser) await browser.close(); await fs.rm(root, { recursive: true, force: true }); }
 }
 

@@ -60,9 +60,13 @@ find ~/.dsh/profiles -path '*/dsh-douyin-ip-report/skills/douyin-ip-report/scrip
 
 ### 2. 安装 Node 依赖
 
+依赖放在私有目录，不要装进插件包；插件升级/重装时不会丢：
+
 ```sh
-cd <SKILL_DIR>/scripts
-npm install --omit=dev
+mkdir -p ~/.dsh/douyin-report
+cd ~/.dsh/douyin-report
+npm init -y
+npm install playwright-core@1.64.1
 ```
 
 ### 3. 私有配置 `~/.dsh/douyin-report/config.json`
@@ -71,7 +75,7 @@ npm install --omit=dev
 {
   "host": "deepseek",
   "node": "/absolute/path/to/node",
-  "node_path": "<SKILL_DIR>/scripts/node_modules",
+  "node_path": "/Users/yourname/.dsh/douyin-report/node_modules",
   "identity": "/absolute/path/to/identity.json",
   "materials": "/absolute/path/to/materials",
   "channel": "chrome"
@@ -121,6 +125,31 @@ python3 <SKILL_DIR>/scripts/host.py --host deepseek login
 
 `login` 会打开专用浏览器，需要可交互终端：扫码完成后回到终端按 Enter。不要在显示二维码时按 Enter。
 
+## 换电脑 / 新机器
+
+插件本身只带代码和技能说明。换一台电脑时，**资料、身份、登录态和历史任务都不会跟着走**：
+
+| 内容 | 是否随插件 | 新机器怎么办 |
+|---|---|---|
+| 插件代码、技能说明 | 是 | 重新安装插件即可 |
+| `config.json` | 否 | 重写，路径按新机器 |
+| `identity.json` | 否 | 从旧机器复制，或按第 4 步重填 |
+| `materials/`（话术、证明材料、执照、`materials.json`） | 否 | 从旧机器复制，或按第 5 步重建 |
+| 浏览器登录态 / Cookie | 否 | **不要复制旧 profile**；在新机器重新扫码 |
+| 本机任务状态、去重记录 | 否 | 不迁移；提交前先查平台历史 |
+| 平台历史回执 | 账号侧 | 用同一个抖音账号登录后可见 |
+
+新机器步骤：
+
+1. 按「安装」装插件；
+2. 按「首次配置」第 2 步在 `~/.dsh/douyin-report` 装 `playwright-core`；
+3. 把旧的 `identity.json` 和 `materials/`（含 `materials.json`）复制过来，没有就按第 4、5 步重建；
+4. 写新的 `config.json`，`node`、`node_path`、`identity`、`materials` 全部换成新机器的绝对路径；
+5. 依次运行 `doctor` → `check` → `login`（在终端扫码）；
+6. 运行 `status`，确认能看到同一个抖音账号的历史回执。
+
+不要复制旧电脑的 `browser-profile/`、`jobs/`、`*.state.json`：它们含登录态和本机状态，既不安全，也不能跨机器通用。历史在平台账号侧，换机器重新扫码后仍然能查；但本机去重状态不会共享，重复提交前必须先查平台历史。
+
 ## 使用
 
 在 DSH 对话里调用 `/douyin-ip-report`，把本次链接文件或工作簿交给它。也可以直接跑命令：
@@ -155,6 +184,8 @@ python3 scripts/host.py --host deepseek status --receipt '<批次编号>'
 - 选择器基于 2026-10 的真实页面校准；抖音改版时执行器会停止并报出具体位置，不会猜着提交。
 - 平台会过滤重复、不可见和无法识别的链接；过滤说明本身不是失败回执。
 - 一个批次“已完成”不代表每个视频都成功，需看明细。
+- 批量任务建议使用完整 `/video/<id>` 链接；`v.douyin.com` 短链的识别结果只能按数量校验，无法逐条核对视频 ID。
+- 回执明细兼容带「补充原因」列的 5/6 列页面；平台再加列时解析会停止并报错，不会猜列。
 - 自测只在本地合成页面运行，不证明你的账号已登录或平台已受理。
 
 ## 开发

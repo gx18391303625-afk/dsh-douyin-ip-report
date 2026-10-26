@@ -8,7 +8,7 @@
 {
   "host": "deepseek",
   "node": "/absolute/path/to/node",
-  "node_path": "/absolute/path/to/scripts/node_modules",
+  "node_path": "/Users/yourname/.dsh/douyin-report/node_modules",
   "identity": "/absolute/path/to/identity.json",
   "materials": "/absolute/path/to/materials",
   "channel": "chrome"
@@ -16,7 +16,7 @@
 ```
 
 - `node` 是 Node.js 可执行文件的绝对路径。
-- `node_path` 必须包含 `playwright-core`；通常就是技能目录 `scripts/node_modules`。
+- `node_path` 必须包含 `playwright-core`；建议单独装在 `~/.dsh/douyin-report/node_modules`，不要装进插件包，插件升级不会丢。
 - `channel` 可为 `chrome` 或 `chromium`；也可用 `"executable_path": "/absolute/path/to/Chrome"`，优先于 `channel`。
 - `identity` 和 `materials` 必须是绝对路径。
 

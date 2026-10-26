@@ -4,7 +4,16 @@
 
 ## 运行时与身份
 
-需要 Python 3.10+、Node.js 20+、Google Chrome。技能目录的 `scripts` 下运行 `npm install --omit=dev` 安装固定版本 `playwright-core`；再把 `node_path` 指向该 `node_modules`。
+需要 Python 3.10+、Node.js 20+、Google Chrome。建议把 `playwright-core@1.64.1` 单独装在私有目录，插件升级时不会丢：
+
+```sh
+mkdir -p ~/.dsh/douyin-report
+cd ~/.dsh/douyin-report
+npm init -y
+npm install playwright-core@1.64.1
+```
+
+然后把 `config.json` 的 `node_path` 指向 `~/.dsh/douyin-report/node_modules`。
 
 私有 `identity.json` 的结构为：
 
