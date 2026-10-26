@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 
@@ -23,6 +24,112 @@ def host_home(host, env=None, user_home=None):
     return root / 'douyin-report'
 
 
+def _host_root(host):
+    override = os.environ.get('DSH_HOME' if host == 'deepseek' else 'CODEX_HOME')
+    return Path(override).expanduser() if override else Path.home() / ('.dsh' if host == 'deepseek' else '.codex')
+
+
+def find_node(host):
+    """Prefer the host's bundled Node, then PATH, then common installs."""
+    roots = []
+    for base in (_host_root(host), Path.home() / ('.dsh' if host == 'deepseek' else '.codex')):
+        roots += sorted((base / 'dsh-runtimes').glob('*/dependencies/node/bin/node'), reverse=True)
+    if host == 'codex':
+        roots += sorted((Path.home() / '.cache' / 'codex-runtimes').glob('*/dependencies/node/bin/node'), reverse=True)
+    found = shutil.which('node')
+    if found:
+        roots.append(Path(found))
+    roots += [Path('/opt/homebrew/bin/node'), Path('/usr/local/bin/node'), Path('/usr/bin/node')]
+    for candidate in roots:
+        try:
+            if candidate.is_file() and os.access(candidate, os.X_OK):
+                return str(candidate)
+        except OSError:
+            continue
+    return ''
+
+
+def find_node_path(host, home):
+    """Find a node_modules directory that already has playwright(-core)."""
+    candidates = [home / 'node_modules']
+    for base in (_host_root(host), Path.home() / ('.dsh' if host == 'deepseek' else '.codex')):
+        candidates += sorted((base / 'profiles').glob('*/node_modules'))
+    candidates.append(Path(__file__).resolve().parent / 'node_modules')
+    for candidate in candidates:
+        if (candidate / 'playwright-core').exists() or (candidate / 'playwright').exists():
+            return candidate
+    return home / 'node_modules'
+
+
+def write_private_json(path, value):
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    temp = path.with_name(path.name + '.tmp')
+    temp.write_text(json.dumps(value, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+    os.chmod(temp, 0o600)
+    os.replace(temp, path)
+
+
+def init_home(host, home):
+    home.mkdir(parents=True, exist_ok=True, mode=0o700)
+    materials = home / 'materials'
+    materials.mkdir(exist_ok=True, mode=0o700)
+    identity = home / 'identity.json'
+    if not identity.exists():
+        write_private_json(identity, {
+            'patent': {'organization': '', 'phone': '', 'email': ''},
+            'trademark': {'organization': '', 'phone': '', 'email': ''},
+        })
+    config = home / 'config.json'
+    if not config.exists():
+        write_private_json(config, {
+            'host': host,
+            'node': find_node(host),
+            'node_path': str(find_node_path(host, home)),
+            'identity': str(identity),
+            'materials': str(materials),
+            'channel': 'chrome',
+        })
+    cfg = read_json(config)
+    template_dir = Path(__file__).resolve().parent.parent / 'templates'
+    copied = []
+    for source, target in [
+        (template_dir / '侵权问题话术.xlsx', materials / '侵权问题话术.xlsx'),
+        (template_dir / 'materials.README.md', materials / 'README.md'),
+        (template_dir / 'materials.json.example', materials / 'materials.json.example'),
+    ]:
+        if source.exists() and not target.exists():
+            shutil.copyfile(source, target)
+            copied.append(target.name)
+    node = cfg.get('node') or ''
+    node_path = Path(cfg.get('node_path') or home / 'node_modules')
+    playwright = (node_path / 'playwright-core').exists() or (node_path / 'playwright').exists()
+    script = Path(__file__).resolve()
+    next_steps = [
+        '编辑 identity.json，填入真实组织名称和联系电话',
+        '按 materials/README.md 放入证明材料、身份截图和营业执照（或改 materials.json）',
+        f'运行 python3 "{script}" --host {host} check',
+        f'运行 python3 "{script}" --host {host} login，扫码登录（agent 运行会自动等待）',
+    ]
+    if not node:
+        next_steps.insert(0, '安装 Node.js 20+，或把 config.json 的 node 改成 Node 的绝对路径')
+    if not playwright:
+        next_steps.insert(0, f'安装 Playwright：cd "{home}" && npm init -y && npm install playwright-core@1.64.1')
+    print(json.dumps({
+        'status': 'initialized',
+        'host': host,
+        'home': str(home),
+        'config': str(config),
+        'identity': str(identity),
+        'materials': str(materials),
+        'node': node or None,
+        'node_path': str(node_path),
+        'playwright_found': playwright,
+        'templates_copied': copied,
+        'next': next_steps,
+    }, ensure_ascii=False))
+    return 0
+
+
 def browser_arguments(cfg):
     executable = cfg.get('executable_path')
     if executable:
@@ -36,9 +143,23 @@ def browser_arguments(cfg):
 
 
 def doctor(node, cfg, env):
-    for key in ['node', 'identity', 'materials', 'node_path']:
+    if not node or not Path(node).is_file() or not os.access(node, os.X_OK):
+        raise ValueError('Node.js not found or not executable; edit config.json or install Node.js 20+.')
+    for key in ['identity', 'materials']:
         if not Path(cfg[key]).exists():
-            raise ValueError('Missing host prerequisite: ' + key)
+            raise ValueError(f'Missing {key}: {cfg[key]}. Run init or fix config.json.')
+    node_path = Path(cfg.get('node_path', ''))
+    if not node_path.is_dir() or not ((node_path / 'playwright-core').exists() or (node_path / 'playwright').exists()):
+        raise ValueError(f'node_path {node_path} does not contain playwright-core; install it with npm or edit config.json.')
+    warnings = []
+    try:
+        identity = read_json(cfg['identity'])
+        for kind in ('patent', 'trademark'):
+            item = identity.get(kind) or {}
+            if not item.get('organization') or not item.get('phone'):
+                warnings.append(f'identity.{kind} is incomplete')
+    except (OSError, ValueError, KeyError):
+        warnings.append('identity.json is invalid')
     args = browser_arguments(cfg)
     options = {'executablePath' if args[0] == '--executable-path' else 'channel': args[1]}
     # A fresh ephemeral context exercises the real browser without touching the
@@ -59,14 +180,17 @@ def doctor(node, cfg, env):
   } finally { if (browser) await browser.close(); }
 })().catch(error => { console.error(error.message); process.exitCode = 1; });
 """
-    subprocess.run([node, '-e', script, json.dumps(options)], env=env, check=True)
-    return 0
+    try:
+        subprocess.run([node, '-e', script, json.dumps(options)], env=env, check=True)
+    except subprocess.CalledProcessError as exc:
+        raise ValueError('Playwright or Chrome check failed; verify node_path contains playwright-core and Google Chrome is installed.') from exc
+    return warnings
 
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--host', required=True, choices=['codex', 'deepseek'])
-    p.add_argument('action', choices=['doctor', 'check', 'login', 'prepare', 'run', 'self-test', 'status'])
+    p.add_argument('action', choices=['init', 'doctor', 'check', 'login', 'prepare', 'run', 'self-test', 'status'])
     p.add_argument('--kind', choices=['patent', 'trademark'])
     source = p.add_mutually_exclusive_group()
     source.add_argument('--links-file', type=Path)
@@ -89,6 +213,14 @@ def main():
     if a.job and (a.links_file or a.links_workbook):
         p.error('choose an existing job or new link input, not both')
     home = host_home(a.host)
+    if a.action == 'init':
+        return init_home(a.host, home)
+    if not (home / 'config.json').exists():
+        print(json.dumps({
+            'status': 'needs_init',
+            'message': f'Run first: python3 "{Path(__file__).resolve()}" --host {a.host} init',
+        }, ensure_ascii=False))
+        return 2
     cfg = read_json(home / 'config.json')
     if cfg['host'] != a.host:
         raise ValueError('Host config mismatch')
@@ -97,19 +229,30 @@ def main():
     runner = str(Path(__file__).with_name('runner.mjs'))
     browser_args = browser_arguments(cfg)
     if a.action == 'doctor':
-        doctor(node, cfg, env)
-        print(json.dumps({'status': 'host_ready', 'host': a.host, 'profile_isolated': True, 'browser_launch_verified': True}))
+        warnings = doctor(node, cfg, env)
+        print(json.dumps({
+            'status': 'host_ready' if not warnings else 'needs_setup',
+            'host': a.host,
+            'profile_isolated': True,
+            'browser_launch_verified': True,
+            'warnings': warnings,
+        }, ensure_ascii=False))
         return 0
     if a.action == 'check':
         kinds = [a.kind] if a.kind else ['patent', 'trademark']
         for kind in kinds:
             job = prepare(Path(cfg['materials']), kind)
+            if job['description'].startswith('（请替换'):
+                print(f'Warning: {kind} description is still the template placeholder; edit 侵权问题话术.xlsx before submitting.', file=sys.stderr)
             print(json.dumps({'host': a.host, 'kind': kind, 'evidence_images': len(job['evidence']), 'status': 'checked_only'}))
         return 0
     if a.action == 'self-test':
         return subprocess.call([node, runner, '--self-test', *browser_args], env=env)
     if a.action == 'login':
-        return subprocess.call([node, runner, '--login', '--profile', str(home / 'browser-profile'), *browser_args], env=env)
+        args = [node, runner, '--login', '--profile', str(home / 'browser-profile'), *browser_args]
+        if not sys.stdin.isatty():
+            args.append('--login-wait')
+        return subprocess.call(args, env=env)
     if a.action == 'status':
         args = [node, runner, '--history', '--profile', str(home / 'browser-profile'), '--max-pages', str(a.max_pages), *browser_args]
         if a.receipt:

@@ -41,7 +41,7 @@ node scripts/runner.mjs --login --profile '<私有目录>/browser-profile' --cha
 node scripts/runner.mjs --job '<私有目录>/job.json' --identity-json '<私有目录>/identity.json' --profile '<私有目录>/browser-profile' --state '<私有目录>/job-state.json' --channel chrome
 ```
 
-扫码完成后回到终端按 Enter。正常执行默认无头模式，不抢系统鼠标键盘；`--headed` 仅供用户接受可见窗口的调试。可用 `--executable-path` 指定实际 Chrome 路径，优先于 `--channel`。
+扫码完成后回到终端按 Enter；在无终端的 agent / 后台运行中加 `--login-wait`（`host.py login` 会自动加），执行器会轮询登录表单并在扫码成功后自动保存，不需要 Enter。正常执行默认无头模式，不抢系统鼠标键盘；`--headed` 仅供用户接受可见窗口的调试。可用 `--executable-path` 指定实际 Chrome 路径，优先于 `--channel`。
 
 第二条默认只填写并检查，随后关闭浏览器。用户明确要求举报或提交本批链接时，在相同命令添加 `--submit`。执行器记录点击与提交状态，空表单不算明确成功。结果未核验时查询历史，不自动重试；明确失败的同一任务可按授权追加 `--retry-failed --submit`。
 

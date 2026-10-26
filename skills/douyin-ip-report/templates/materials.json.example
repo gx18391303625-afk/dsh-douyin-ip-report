@@ -1,0 +1,16 @@
+{
+  "patent": {
+    "template_label": "专利侵权话术",
+    "link_label": "专利侵权链接",
+    "evidence": ["专利投诉材料1.jpg", "专利投诉材料2.jpg", "专利投诉材料3.jpg", "专利投诉材料4.jpg", "专利投诉材料5.jpg", "专利投诉材料6.jpg"],
+    "identity_reference": "专利侵权的组织身份.png",
+    "license": "patent-license.jpg"
+  },
+  "trademark": {
+    "template_label": "商标侵权话术",
+    "link_label": "商标侵权链接",
+    "evidence": ["商标投诉材料.png"],
+    "identity_reference": "商标侵权的组织身份.png",
+    "license": "trademark-license.jpg"
+  }
+}

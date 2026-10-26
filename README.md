@@ -46,7 +46,26 @@ dsh plugin --profile web add dsh-douyin-ip-report
 
 > 如果本机已经手动放过同名 `douyin-ip-report` 技能目录，插件注册的同名技能可能被本地目录遮蔽；测试插件前先把旧目录移开，确认技能来源。
 
-## 首次配置
+## 快速开始（新机器 3 步）
+
+装好插件后，在 DSH 里直接说「初始化抖音举报插件」，或者运行：
+
+```sh
+python3 <SKILL_DIR>/scripts/host.py --host deepseek init
+```
+
+`init` 会自动：
+
+- 创建 `~/.dsh/douyin-report/`（或 `$DSH_HOME/douyin-report/`）；
+- 生成 `config.json`、`identity.json` 模板和 `materials/` 目录；
+- 尽量自动找到本机 Node 和已有的 `playwright-core`；
+- 复制话术工作簿模板、资料说明和 `materials.json` 示例。
+
+然后按它输出的 `next` 做三件事：填 `identity.json`、按 `materials/README.md` 放材料、运行 `check` 和 `login`。`init` 不会覆盖已有的 config、身份或资料，重复运行只补缺失文件。
+
+## 首次配置（手动 / 排障）
+
+`init` 已经自动完成下面第 1-3 步；只有 `init` 找不到 Node/Playwright，或你要手动改路径时，才需要看这一节。
 
 插件只注册技能，真正的资料、身份和运行时仍放在本机私有目录，**不会进入仓库**。
 
@@ -123,7 +142,7 @@ python3 <SKILL_DIR>/scripts/host.py --host deepseek check
 python3 <SKILL_DIR>/scripts/host.py --host deepseek login
 ```
 
-`login` 会打开专用浏览器，需要可交互终端：扫码完成后回到终端按 Enter。不要在显示二维码时按 Enter。
+`login` 会打开专用浏览器。在终端里运行会等你按 Enter；在 DSH / agent 后台运行时没有终端，会自动等待登录表单出现（最多 5 分钟），扫码完成即保存，不需要再按 Enter。
 
 ## 换电脑 / 新机器
 

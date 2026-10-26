@@ -11,6 +11,8 @@ description: 使用本机私有资料准备并按授权执行抖音专利或商�
 
 插件只负责注册技能。实际执行需要本机具备 Python 3.10+、Node.js 20+、Google Chrome 和 `playwright-core`，并创建私有 `~/.dsh/douyin-report/config.json`、`identity.json` 与资料目录。具体格式见 [local-host.md](references/local-host.md) 和 [execution.md](references/execution.md)。
 
+首次使用或 `doctor` 返回 `needs_init` 时，先运行 `scripts/host.py --host deepseek init`，按输出的 `next` 填写 `identity.json`、放入材料，再运行 `check` 和 `login`。`init` 不会覆盖已有的配置、身份或资料。
+
 首次使用需要扫码；每台电脑、每个宿主各用自己的专用 profile。不读取或复制日常 Chrome 的登录数据库。用户没有提供本次链接时，只可检查配置、登录或查询历史。
 
 ## 输入与授权
@@ -24,7 +26,7 @@ description: 使用本机私有资料准备并按授权执行抖音专利或商�
 
 1. 用 `host.py check` 检查本机资料。用 `prepare` 或 `run` 加本次链接文件生成稳定任务；不编造对象。详细参数见 [execution.md](references/execution.md)。
 2. 优先复用匹配的组织身份；缺少时用本机身份配置创建，并上传对应营业执照。身份截图只用于核对，不能代替执照。
-3. 登录失效时运行 `login`，等用户扫码完成后再继续。额外验证码或风控须等待用户处理，不循环尝试。
+3. 登录失效时运行 `login`，等用户扫码完成后再继续；无终端时执行器会自动等待登录表单，不需要按 Enter。额外验证码或风控须等待用户处理，不循环尝试。
 4. 根据类型自动选择「假冒专利」或「假冒商标」。扫码后的默认「曝光肖像」正常，无需用户手动切换。识别链接时保留 `v.douyin.com` 短链接的结尾斜杠；执行器已处理。
 5. 核验识别数量、证明材料上传完成及正确组织。平台过滤重复或不可见内容时，记录各项原因；不能把未识别内容算作已举报。部分有效时，只处理用户原始范围内的平台有效内容并保留与原任务的关联。
 6. 有本批授权才加 `--submit`。状态文件用于防止重复提交，不能删除或换任务路径绕过保护。提交结果不明先查历史；不能仅因表单清空就报告成功。

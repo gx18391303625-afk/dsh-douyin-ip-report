@@ -535,7 +535,7 @@ async function historyQuery(options, profile, channelOptions) {
 
 function parseArgs(argv) {
   const options = {};
-  const flags = new Set(['login', 'submit', 'retry-failed', 'headed', 'self-test', 'help', 'history']);
+  const flags = new Set(['login', 'login-wait', 'submit', 'retry-failed', 'headed', 'self-test', 'help', 'history']);
   const valued = new Set(['job', 'profile', 'identity-json', 'state', 'channel', 'executable-path', 'receipt', 'video-ids', 'max-pages']);
   for (let i = 0; i < argv.length; i++) {
     const name = argv[i].replace(/^--/, '');
@@ -546,7 +546,7 @@ function parseArgs(argv) {
   return options;
 }
 function help() {
-  console.log('Usage:\n  node runner.mjs --login --profile ABS_PROFILE [--channel chrome]\n  node runner.mjs --job ABS_JOB --identity-json ABS_IDENTITY --profile ABS_PROFILE --state ABS_STATE [--channel chrome] [--headed] [--submit] [--retry-failed]\n  node runner.mjs --history --profile ABS_PROFILE [--receipt ID] [--video-ids FILE] [--max-pages 100] [--channel chrome]\n  node runner.mjs --self-test [--channel chrome]\nBrowser override: --executable-path ABS_BROWSER takes precedence over --channel.\nDefault: fill and verify form without clicking final submission. History queries are read-only and never change job states. Identity JSON: {"patent":{"organization":"...","phone":"...","email":"..."},"trademark":{...}}');
+  console.log('Usage:\n  node runner.mjs --login --profile ABS_PROFILE [--login-wait] [--channel chrome]\n  node runner.mjs --job ABS_JOB --identity-json ABS_IDENTITY --profile ABS_PROFILE --state ABS_STATE [--channel chrome] [--headed] [--submit] [--retry-failed]\n  node runner.mjs --history --profile ABS_PROFILE [--receipt ID] [--video-ids FILE] [--max-pages 100] [--channel chrome]\n  node runner.mjs --self-test [--channel chrome]\nBrowser override: --executable-path ABS_BROWSER takes precedence over --channel.\nDefault: fill and verify form without clicking final submission. History queries are read-only and never change job states. Identity JSON: {"patent":{"organization":"...","phone":"...","email":"..."},"trademark":{...}}');
 }
 async function profileDirectory(raw) {
   if (!raw || !path.isAbsolute(raw)) stop('PROFILE_REQUIRED', '--profile must name an absolute dedicated browser profile directory.');
@@ -582,10 +582,26 @@ export async function main(argv = process.argv.slice(2)) {
     try {
       const page = context.pages()[0] || await context.newPage();
       await page.goto(REPORT_URL, { waitUntil: 'domcontentloaded' });
-      const terminal = createInterface({ input: process.stdin, output: process.stdout });
-      try { await terminal.question('请在专用浏览器扫码并完成所需验证，然后回到终端按 Enter 保存登录会话。'); }
-      finally { terminal.close(); }
-      await requireReportForm(page);
+      if (options['login-wait']) {
+        // Non-interactive hosts (agents, background jobs) cannot press Enter:
+        // poll until the logged-in report form is actually available.
+        process.stderr.write('请在专用浏览器扫码登录，登录成功后会自动继续...\n');
+        const deadline = Date.now() + 5 * 60 * 1000;
+        let ready = false;
+        while (Date.now() < deadline) {
+          try { await requireReportForm(page); ready = true; break; }
+          catch (error) {
+            if (error.code === 'HUMAN_VERIFICATION_REQUIRED') throw error;
+            await page.waitForTimeout(2000);
+          }
+        }
+        if (!ready) stop('LOGIN_TIMEOUT', 'No logged-in report form appeared within 5 minutes.');
+      } else {
+        const terminal = createInterface({ input: process.stdin, output: process.stdout });
+        try { await terminal.question('请在专用浏览器扫码并完成所需验证，然后回到终端按 Enter 保存登录会话。'); }
+        finally { terminal.close(); }
+        await requireReportForm(page);
+      }
       console.log(JSON.stringify({ status: 'login_form_available', submitted: false }));
     } finally { await context.close(); }
     return;

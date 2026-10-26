@@ -205,7 +205,7 @@ def read_template(materials: Path, kind: str, spec: dict) -> str:
     matches = [(cells, row, col) for cells in sheets.values()
                for (row, col), value in cells.items() if value.strip() == label]
     if len(matches) != 1:
-        raise InputError("Complaint template label must occur exactly once")
+        raise InputError(f"Complaint template label must occur exactly once: {label}")
     cells, row, col = matches[0]
     value = cells.get((row + 1, col), "").strip()
     if not value:
@@ -255,7 +255,7 @@ def read_links(path: Path, kind: str, workbook: bool, spec: dict) -> tuple[list[
         matches = [(cells, col) for cells in sheets.values()
                    for (row, col), value in cells.items() if row == 1 and value.strip() == label]
         if len(matches) != 1:
-            raise InputError("Selected complaint type must have exactly one matching row-1 link header")
+            raise InputError(f"Selected complaint type must have exactly one matching row-1 link header: {label}")
         cells, col = matches[0]
         values = [value for (row, column), value in sorted(cells.items()) if row > 1 and column == col]
     else:
@@ -286,19 +286,19 @@ def read_links(path: Path, kind: str, workbook: bool, spec: dict) -> tuple[list[
 def image_record(path: Path) -> dict:
     try:
         if not path.is_file():
-            raise InputError("A required material image is missing")
+            raise InputError(f"A required material image is missing: {path.name}")
         size = path.stat().st_size
         if size == 0 or size > MAX_IMAGE_BYTES:
-            raise InputError("A material image is empty or exceeds the 5 MB limit (5,000,000 bytes)")
+            raise InputError(f"A material image is empty or exceeds the 5 MB limit (5,000,000 bytes): {path.name}")
         data = path.read_bytes()
     except OSError as exc:
-        raise InputError("Cannot read a required material image") from exc
+        raise InputError(f"Cannot read a required material image: {path.name}") from exc
     if path.suffix.lower() in (".jpg", ".jpeg") and data.startswith(b"\xff\xd8\xff"):
         mime = "image/jpeg"
     elif path.suffix.lower() == ".png" and data.startswith(b"\x89PNG\r\n\x1a\n"):
         mime = "image/png"
     else:
-        raise InputError("A material image does not match its JPEG/PNG signature")
+        raise InputError(f"A material image does not match its JPEG/PNG signature: {path.name}")
     return {"path": str(path.resolve()), "bytes": len(data), "media_type": mime,
             "sha256": hashlib.sha256(data).hexdigest()}
 

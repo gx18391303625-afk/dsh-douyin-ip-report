@@ -25,6 +25,7 @@
 在技能目录运行，或将脚本改为绝对路径：
 
 ```sh
+python3 scripts/host.py --host deepseek init
 python3 scripts/host.py --host deepseek doctor
 python3 scripts/host.py --host deepseek check
 python3 scripts/host.py --host deepseek login
@@ -33,13 +34,13 @@ python3 scripts/host.py --host deepseek run --job '<私有目录>/jobs/<job>.jso
 python3 scripts/host.py --host deepseek status
 ```
 
-`doctor` 检查配置、Node、Playwright 和 Chrome；`check` 只检查资料，不打开浏览器；`login` 打开专用浏览器扫码；`prepare` 只生成本地任务；`run` 默认识别、填表、检查后关闭浏览器，不点击最终提交；`status` 只读查询历史。
+`init` 创建私有目录、`config.json`、`identity.json` 模板和 `materials/`，并尽量自动找到 Node 与已有的 `playwright-core`；不覆盖已有文件。`doctor` 检查配置、Node、Playwright 和 Chrome，身份未填时返回 `needs_setup` 警告；`check` 只检查资料，不打开浏览器；`login` 打开专用浏览器扫码；`prepare` 只生成本地任务；`run` 默认识别、填表、检查后关闭浏览器，不点击最终提交；`status` 只读查询历史。
 
 ## 执行语义
 
 - 商标将 `patent` 换为 `trademark`；可用 `--links-workbook` 指定本次工作簿。
 - 用户明确要求举报这批链接时，在 `run` 后加 `--submit`，不必重复询问同一授权。单纯检查、安装或测试环境不用该标记。
-- `login` 需要可交互终端：等用户确认扫码完成后再按 Enter，不要启动后立即发送，也不要把显示二维码当作已登录。
+- `login` 打开专用浏览器。在终端里运行会等用户按 Enter；无终端（agent / 后台）会自动等待登录表单出现，最多 5 分钟，扫码完成即保存。不要把显示二维码当作已登录。
 - `status` 只读查询历史；指定 `--receipt` 和必要的 `--video-ids` 可核对批次明细。具体命令见 [execution.md](execution.md)。
 - 相同任务复用同一状态文件；不能删除状态或随意换路径绕过保护。明确失败且仍需处理时才用 `--retry-failed --submit`。部分接收不重投整批；结果不明先查平台历史。
 
