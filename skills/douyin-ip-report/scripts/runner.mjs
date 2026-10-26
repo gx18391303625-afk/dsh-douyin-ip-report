@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /** Local deterministic Douyin runner. No model calls and no OS input control. */
 import fs from 'node:fs/promises';
+import { realpathSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
@@ -745,7 +746,18 @@ export async function selfTest(channelOptions = {}) {
   } finally { if (browser) await browser.close(); await fs.rm(root, { recursive: true, force: true }); }
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+function isCliEntry() {
+  if (!process.argv[1]) return false;
+  try {
+    // pnpm installs the plugin through a symlink; Node resolves import.meta.url
+    // to the real path, so compare real paths rather than the invoked path.
+    return realpathSync(path.resolve(process.argv[1])) === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+}
+
+if (isCliEntry()) {
   main().catch(error => {
     console.error(JSON.stringify({ status: 'stopped', code: error instanceof WorkflowError ? error.code : 'AUTOMATION_ERROR', message: error instanceof WorkflowError ? error.message : 'Browser operation failed. Inspect the local form or calibrate selectors; no automatic retry was performed.' }));
     process.exitCode = 2;
