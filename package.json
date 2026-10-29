@@ -30,7 +30,9 @@
     }
   },
   "peerDependencies": {
-    "@deepseek-ai/dsh-skill-filesystem": "*"
+    "@deepseek-ai/cordis": "*",
+    "@deepseek-ai/dsh-skill-filesystem": "*",
+    "react": "^18.0.0"
   },
   "keywords": [
     "dsh",
