@@ -13,6 +13,17 @@ description: 使用本机私有资料准备并按授权执行抖音专利或商�
 
 首次使用或 `doctor` 返回 `needs_init` 时，先运行 `scripts/host.py --host deepseek init`，按输出的 `next` 填写 `identity.json`、放入材料，再运行 `check` 和 `login`。`init` 不会覆盖已有的配置、身份或资料。
 
+## 第一次安装：开始检查
+
+用户第一次使用、说「开始检查」或环境不确定时，运行 `scripts/host.py --host deepseek setup`（Windows 用 `py -3`，macOS/Linux 用 `python3`）。它只做检查和安全的初始化，输出 `checks` 与 `next`：
+
+- 缺 Python/Node/Chrome 时先说明，征得用户同意后再装（Windows 可用 winget，macOS 可用 brew）；`setup --fix` 只自动安装 `playwright-core`，不装系统软件。
+- 缺身份时向用户要专利/商标的组织名称和电话，写入 `identity.json`。
+- 缺材料时向用户要文件或文件夹；已有文件夹用 `setup --set-materials <目录>`，对话里上传的文件复制到 setup 报出的材料目录并按默认文件名命名。
+- 然后重新运行 `setup`，确认 `status` 为 `ready`；再运行 `check`、`login` 扫码，用 1–2 条链接做小样本，确认不提交也能填表/核验。
+
+`setup` 不是提交授权；不要在检查阶段传 `--submit`。
+
 首次使用需要扫码；每台电脑、每个宿主各用自己的专用 profile。不读取或复制日常 Chrome 的登录数据库。用户没有提供本次链接时，只可检查配置、登录或查询历史。
 
 ## 输入与授权

@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
 """Host-specific local entry point. Never submit unless --submit is provided."""
 import argparse
+import contextlib
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
+import platform
 import shutil
 import subprocess
 import sys
 
-from prepare_job import prepare, write_manifest, InputError
+from prepare_job import prepare, write_manifest, InputError, load_specs
 
 
 def read_json(path):
@@ -130,6 +133,178 @@ def init_home(host, home):
     return 0
 
 
+def chrome_path(cfg):
+    executable = cfg.get('executable_path')
+    if executable:
+        path = Path(executable).expanduser()
+        return str(path) if path.is_file() else ''
+    if os.name == 'nt':
+        for key in ('PROGRAMFILES', 'PROGRAMFILES(X86)', 'LOCALAPPDATA'):
+            root = os.environ.get(key)
+            if root:
+                candidate = Path(root) / 'Google' / 'Chrome' / 'Application' / 'chrome.exe'
+                if candidate.is_file():
+                    return str(candidate)
+    if sys.platform == 'darwin':
+        candidate = Path('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome')
+        if candidate.is_file():
+            return str(candidate)
+    for name in ('google-chrome', 'google-chrome-stable', 'chromium', 'chromium-browser'):
+        found = shutil.which(name)
+        if found:
+            return found
+    return ''
+
+
+def node_version(node):
+    if not node:
+        return ''
+    try:
+        result = subprocess.run([node, '--version'], capture_output=True, text=True, timeout=10)
+        return result.stdout.strip() if result.returncode == 0 else ''
+    except (OSError, subprocess.SubprocessError):
+        return ''
+
+
+def npm_path():
+    for name in ('npm', 'npm.cmd'):
+        found = shutil.which(name)
+        if found:
+            return found
+    return ''
+
+
+def identity_missing(cfg):
+    try:
+        data = read_json(cfg['identity'])
+    except (OSError, ValueError):
+        return ['identity.json 无法读取']
+    missing = []
+    for kind in ('patent', 'trademark'):
+        item = data.get(kind) if isinstance(data, dict) else None
+        if not isinstance(item, dict):
+            missing.append(kind)
+            continue
+        if not str(item.get('organization') or '').strip():
+            missing.append(f'{kind}.organization')
+        if not str(item.get('phone') or '').strip():
+            missing.append(f'{kind}.phone')
+    return missing
+
+
+def materials_status(cfg):
+    if not cfg.get('materials'):
+        return {'missing': ['config.materials 未设置'], 'errors': []}
+    materials = Path(cfg['materials'])
+    try:
+        specs = load_specs(materials)
+    except InputError as exc:
+        return {'missing': [str(exc)], 'errors': []}
+    missing, errors = [], []
+    for kind in ('patent', 'trademark'):
+        spec = specs[kind]
+        required = ['侵权问题话术.xlsx', *spec['evidence'], spec['identity_reference'], spec['license']]
+        kind_missing = [name for name in required if not (materials / name).is_file()]
+        missing.extend(kind_missing)
+        if not kind_missing:
+            try:
+                prepare(materials, kind)
+            except InputError as exc:
+                errors.append(str(exc))
+    return {'missing': missing, 'errors': errors}
+
+
+def setup_home(host, home, fix=False, set_materials=None, set_identity=None):
+    """First-run check. Creates the private skeleton, resolves paths, and
+    reports what is still missing. System packages (Python/Node/Chrome) are
+    reported, not installed; --fix only installs playwright-core with npm."""
+    with contextlib.redirect_stdout(io.StringIO()):
+        init_home(host, home)
+    config = home / 'config.json'
+    cfg = read_json(config)
+    changed = False
+    if set_materials:
+        path = Path(set_materials).expanduser().resolve()
+        if not path.is_dir():
+            raise ValueError('--set-materials must be an existing directory')
+        cfg['materials'] = str(path)
+        changed = True
+    if set_identity:
+        path = Path(set_identity).expanduser().resolve()
+        if not path.is_file():
+            raise ValueError('--set-identity must be an existing file')
+        cfg['identity'] = str(path)
+        changed = True
+    node = cfg.get('node') or find_node(host)
+    if node and cfg.get('node') != node:
+        cfg['node'] = node
+        changed = True
+    if changed:
+        write_private_json(config, cfg)
+    npm = npm_path()
+    node_path = Path(cfg.get('node_path') or home / 'node_modules')
+    playwright = (node_path / 'playwright-core').exists() or (node_path / 'playwright').exists()
+    if fix and not playwright and npm:
+        package = home / 'package.json'
+        if not package.exists():
+            package.write_text('{"name":"douyin-report-private","private":true}\n', encoding='utf-8')
+        subprocess.run([npm, 'install', 'playwright-core@1.64.1'],
+                       cwd=home, capture_output=True, text=True)
+        if (home / 'node_modules' / 'playwright-core').exists():
+            cfg['node_path'] = str(home / 'node_modules')
+            write_private_json(config, cfg)
+            node_path = home / 'node_modules'
+            playwright = True
+    chrome = chrome_path(cfg)
+    python_ok = sys.version_info >= (3, 10)
+    missing_identity = identity_missing(cfg)
+    materials = materials_status(cfg)
+    login_profile = (home / 'browser-profile').is_dir()
+    checks = [
+        {'id': 'python', 'ok': python_ok, 'detail': platform.python_version()},
+        {'id': 'node', 'ok': bool(node), 'detail': node_version(node) or node or '未找到'},
+        {'id': 'npm', 'ok': bool(npm), 'detail': npm or '未找到'},
+        {'id': 'chrome', 'ok': bool(chrome), 'detail': chrome or '未找到'},
+        {'id': 'config', 'ok': config.is_file(), 'detail': str(config)},
+        {'id': 'identity', 'ok': not missing_identity, 'missing': missing_identity},
+        {'id': 'materials', 'ok': not materials['missing'] and not materials['errors'],
+         'missing': materials['missing'], 'errors': materials['errors']},
+        {'id': 'playwright', 'ok': playwright, 'detail': str(node_path)},
+        {'id': 'login', 'ok': login_profile, 'detail': 'browser-profile 已存在' if login_profile else '尚未扫码登录'},
+    ]
+    ready = (python_ok and bool(node) and bool(chrome) and playwright
+             and not missing_identity and not materials['missing'] and not materials['errors']
+             and login_profile)
+    next_steps = []
+    if not python_ok:
+        next_steps.append('升级到 Python 3.10+')
+    if not node:
+        next_steps.append('安装 Node.js 20+（Windows: winget install -e --id OpenJS.NodeJS.LTS；macOS: brew install node）')
+    if not npm and not playwright:
+        next_steps.append('安装 Node.js（包含 npm），或手动安装 playwright-core@1.64.1')
+    if not chrome:
+        next_steps.append('安装 Google Chrome（Windows: winget install -e --id Google.Chrome；macOS: brew install --cask google-chrome）')
+    if not playwright:
+        next_steps.append(f'安装 Playwright：cd "{home}" && npm init -y && npm install playwright-core@1.64.1（或运行 setup --fix）')
+    if missing_identity:
+        next_steps.append('填写 identity.json 的专利/商标组织名称和电话；或把组织信息告诉我')
+    if materials['missing'] or materials['errors']:
+        next_steps.append('补充证明材料/身份截图/营业执照/话术工作簿；可把文件发到对话或告诉我文件夹')
+    if not login_profile:
+        next_steps.append('运行 login，在打开的 Chrome 里扫码登录抖音')
+    if ready:
+        next_steps.append('环境已就绪；先用 1–2 条链接做小样本测试，不要直接批量提交')
+    print(json.dumps({
+        'status': 'ready' if ready else 'needs_setup',
+        'host': host,
+        'home': str(home),
+        'checks': checks,
+        'next': next_steps,
+        'paths': {'config': str(config), 'identity': cfg.get('identity'), 'materials': cfg.get('materials')},
+    }, ensure_ascii=False))
+    return 0
+
+
 def browser_arguments(cfg):
     executable = cfg.get('executable_path')
     if executable:
@@ -190,7 +365,7 @@ def doctor(node, cfg, env):
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--host', required=True, choices=['codex', 'deepseek'])
-    p.add_argument('action', choices=['init', 'doctor', 'check', 'login', 'prepare', 'run', 'self-test', 'status'])
+    p.add_argument('action', choices=['init', 'setup', 'doctor', 'check', 'login', 'prepare', 'run', 'self-test', 'status'])
     p.add_argument('--kind', choices=['patent', 'trademark'])
     source = p.add_mutually_exclusive_group()
     source.add_argument('--links-file', type=Path)
@@ -201,7 +376,12 @@ def main():
     p.add_argument('--receipt')
     p.add_argument('--video-ids', type=Path)
     p.add_argument('--max-pages', type=int, default=100)
+    p.add_argument('--fix', action='store_true')
+    p.add_argument('--set-materials', type=Path)
+    p.add_argument('--set-identity', type=Path)
     a = p.parse_args()
+    if (a.fix or a.set_materials or a.set_identity) and a.action != 'setup':
+        p.error('setup flags only apply to setup')
     if (a.receipt or a.video_ids or a.max_pages != 100) and a.action != 'status':
         p.error('history filters only apply to status')
     if not 1 <= a.max_pages <= 200:
@@ -213,6 +393,8 @@ def main():
     if a.job and (a.links_file or a.links_workbook):
         p.error('choose an existing job or new link input, not both')
     home = host_home(a.host)
+    if a.action == 'setup':
+        return setup_home(a.host, home, a.fix, a.set_materials, a.set_identity)
     if a.action == 'init':
         return init_home(a.host, home)
     if not (home / 'config.json').exists():
