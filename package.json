@@ -1,19 +1,32 @@
 {
   "name": "dsh-douyin-ip-report",
-  "version": "0.2.2",
-  "description": "抖音专利/商标侵权举报技能包：本地资料预检、专用浏览器执行、历史回执查询（DeepSeek Harness skill plugin）",
+  "version": "0.3.0",
+  "description": "抖音专利/商标侵权举报技能包 + 左侧栏面板：本地任务状态、资料预检、专用浏览器执行、历史回执查询（DeepSeek Harness plugin）",
   "license": "MIT",
   "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
   "files": [
     "cordis.patch.yml",
+    "lib",
     "skills",
     "examples",
     "README.md",
     "LICENSE"
   ],
+  "scripts": {
+    "test": "node test/smoke-client.mjs && node test/smoke-host.mjs"
+  },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
     }
   },
   "peerDependencies": {

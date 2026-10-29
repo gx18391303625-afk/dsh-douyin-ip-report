@@ -1,6 +1,6 @@
 # dsh-douyin-ip-report
 
-DeepSeek Harness 的抖音专利 / 商标侵权举报技能包：用专用浏览器核对**用户本次明确提供**的链接、证明材料和本机组织身份，记录每个任务的提交状态，并只读查询平台历史回执。
+DeepSeek Harness 的抖音专利 / 商标侵权举报插件：用专用浏览器核对**用户本次明确提供**的链接、证明材料和本机组织身份，记录每个任务的提交状态，只读查询平台历史回执，并在左侧栏提供一个任务面板。
 
 > English: A DeepSeek Harness skill plugin for filing Douyin patent / trademark complaints from user-supplied links and local materials. It never discovers targets, never submits without explicit authorization, and queries platform history read-only.
 
@@ -11,6 +11,18 @@ DeepSeek Harness 的抖音专利 / 商标侵权举报技能包：用专用浏览
 - **默认不提交**：只有显式加 `--submit` 才点击最终「提交」；提交前把范围重新核对一遍。
 - **状态与回执**：任务状态文件防止同一任务重复点击；`status` 只读查询历史批次和视频明细，不撤销、不提交。
 - **平台过滤如实记录**：重复、不可见、无法识别的链接不会被算成已举报。
+- **左侧栏面板**：v0.3.0 起在 DSH Web 左侧栏增加「抖音举报」入口，显示本机任务数、最近任务和快捷打开举报页。
+
+## 左侧栏面板
+
+安装或更新到 v0.3.0 后，刷新页面/重启 DSH，左侧栏会出现「抖音举报」：
+
+- 点开显示本机任务数（已准备 / 已提交 / 待核验 / 失败）和最近 8 个任务；
+- 数据来自 `~/.dsh/douyin-report/jobs/*.state.json`，通过插件自己的 `/dsh-douyin-report/summary` 读取，只返回类型、状态、条数和更新时间；不读链接、话术、证明材料或身份；
+- 「刷新」重新读取本地状态，「打开抖音举报页」打开抖音举报页；
+- 平台是否受理、审核结果仍以技能 `status` 查询到的历史回执为准。
+
+宿主不支持 `sidebar.panellist` 时不会出现这一行，但技能部分仍然可用。
 
 ## 安全边界
 

@@ -16,3 +16,5 @@
         includeDefaultRoots: false
         customSkillDirs:
           - !!js "process.getBuiltinModule('node:url').fileURLToPath(new URL('skills/', baseUrl))"
+    - id: dsh-douyin-ip-report
+      name: 'dsh-douyin-ip-report'
