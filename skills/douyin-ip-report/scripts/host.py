@@ -305,6 +305,24 @@ def setup_home(host, home, fix=False, set_materials=None, set_identity=None):
     return 0
 
 
+def read_ui_settings(home):
+    try:
+        data = read_json(home / 'ui-settings.json')
+    except (OSError, ValueError):
+        return {'confirm_before_submit': True}
+    return {'confirm_before_submit': data.get('confirm_before_submit') is not False}
+
+
+def show_settings(host, home):
+    settings = read_ui_settings(home)
+    print(json.dumps({
+        'host': host,
+        'confirm_before_submit': settings['confirm_before_submit'],
+        'file': str(home / 'ui-settings.json'),
+    }, ensure_ascii=False))
+    return 0
+
+
 def browser_arguments(cfg):
     executable = cfg.get('executable_path')
     if executable:
@@ -365,7 +383,7 @@ def doctor(node, cfg, env):
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--host', required=True, choices=['codex', 'deepseek'])
-    p.add_argument('action', choices=['init', 'setup', 'doctor', 'check', 'login', 'prepare', 'run', 'self-test', 'status'])
+    p.add_argument('action', choices=['init', 'setup', 'settings', 'doctor', 'check', 'login', 'prepare', 'run', 'self-test', 'status'])
     p.add_argument('--kind', choices=['patent', 'trademark'])
     source = p.add_mutually_exclusive_group()
     source.add_argument('--links-file', type=Path)
@@ -393,6 +411,8 @@ def main():
     if a.job and (a.links_file or a.links_workbook):
         p.error('choose an existing job or new link input, not both')
     home = host_home(a.host)
+    if a.action == 'settings':
+        return show_settings(a.host, home)
     if a.action == 'setup':
         return setup_home(a.host, home, a.fix, a.set_materials, a.set_identity)
     if a.action == 'init':

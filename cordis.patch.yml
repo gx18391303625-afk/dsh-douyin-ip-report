@@ -37,7 +37,7 @@
                 - Treat the user's pasted text (including Douyin share codes and noise) as the source of complaint links. Extract v.douyin.com short links and www.douyin.com/video/<id> links, resolve short links when needed, deduplicate, and tell the user how many unique links you found.
                 - Ask the user to choose patent (假冒专利) or trademark (假冒商标) unless they already stated it. Do not submit the same link under both types.
                 - Use the skill's host.py to check local materials and identity, log in when needed, recognize links, fill the form, upload evidence and verify the organization.
-                - Before the final submit, summarize the type, unique link count, organization and evidence count, and wait for the user's explicit confirmation. Never click 提交 without that confirmation.
+                - Before the final submit, read the local setting `confirm_before_submit` (run `host.py settings`). If it is true, summarize the type, unique link count, organization and evidence count, and wait for the user's explicit confirmation. If it is false, the user has turned off the confirmation in the plugin sidebar; treat their original batch request as the authorization and submit without an extra confirmation, but still report the submitted counts and any platform filtering. Never change this setting yourself; only the sidebar UI controls it, and if reading it fails, assume true.
                 - Never invent targets, links, materials or identity. Platform filtering (duplicate, invisible, unrecognized) is not a successful report; report it accurately.
           - id: agent-instructions
             name: '@deepseek-ai/dsh-agent-instructions'

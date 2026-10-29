@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
 
 let loaded;
 globalThis.window = {
@@ -13,6 +14,10 @@ globalThis.document = {
 };
 
 const clientUrl = new URL('../lib/client.js', import.meta.url);
+const source = await fs.readFile(clientUrl, 'utf8');
+assert.match(source, /提交前确认/, 'panel must expose the confirmation toggle');
+assert.match(source, /ddr-switch/, 'panel must render the toggle switch');
+assert.match(source, /\/dsh-douyin-report\/settings/, 'panel must persist the setting through the host route');
 await import(clientUrl.href + '?smoke=' + Date.now());
 
 assert.equal(loaded.id, 'dsh-douyin-ip-report', 'ModuleLoader id must match the package name');
