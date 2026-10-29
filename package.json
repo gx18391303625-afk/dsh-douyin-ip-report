@@ -1,6 +1,6 @@
 {
   "name": "dsh-douyin-ip-report",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "抖音专利/商标侵权举报技能包 + 左侧栏面板：本地任务状态、资料预检、专用浏览器执行、历史回执查询（DeepSeek Harness plugin）",
   "license": "MIT",
   "type": "module",
