@@ -1,0 +1,21 @@
+# Defense in depth if private files are accidentally placed below package directories.
+**/__pycache__/
+**/*.pyc
+**/.DS_Store
+**/.env
+**/.env.*
+**/config.json
+**/identity.json
+**/ui-settings.json
+**/materials.json
+**/browser-profile/
+**/original-browser-profile/
+**/chrome-profile/
+**/jobs/
+**/reports/
+**/recordings/
+**/backups/
+**/*.state.json
+**/*.jsonl
+**/original-ledger.json
+**/original-runner.lock

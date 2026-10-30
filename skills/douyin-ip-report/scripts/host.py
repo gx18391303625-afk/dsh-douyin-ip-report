@@ -13,6 +13,7 @@ import subprocess
 import sys
 
 from prepare_job import prepare, write_manifest, InputError, load_specs
+from original_job import complaint_kind, prepare_original, local_original_status
 
 
 def read_json(path):
@@ -214,7 +215,7 @@ def materials_status(cfg):
     return {'missing': missing, 'errors': errors}
 
 
-def setup_home(host, home, fix=False, set_materials=None, set_identity=None):
+def setup_home(host, home, fix=False, set_materials=None, set_identity=None, kind=None):
     """First-run check. Creates the private skeleton, resolves paths, and
     reports what is still missing. System packages (Python/Node/Chrome) are
     reported, not installed; --fix only installs playwright-core with npm."""
@@ -257,9 +258,10 @@ def setup_home(host, home, fix=False, set_materials=None, set_identity=None):
             playwright = True
     chrome = chrome_path(cfg)
     python_ok = sys.version_info >= (3, 10)
-    missing_identity = identity_missing(cfg)
-    materials = materials_status(cfg)
-    login_profile = (home / 'browser-profile').is_dir()
+    missing_identity = [] if kind == 'original' else identity_missing(cfg)
+    materials = {'missing': [], 'errors': []} if kind == 'original' else materials_status(cfg)
+    profile_name = 'original-browser-profile' if kind == 'original' else 'browser-profile'
+    login_profile = (home / profile_name).is_dir()
     checks = [
         {'id': 'python', 'ok': python_ok, 'detail': platform.python_version()},
         {'id': 'node', 'ok': bool(node), 'detail': node_version(node) or node or '未找到'},
@@ -270,7 +272,7 @@ def setup_home(host, home, fix=False, set_materials=None, set_identity=None):
         {'id': 'materials', 'ok': not materials['missing'] and not materials['errors'],
          'missing': materials['missing'], 'errors': materials['errors']},
         {'id': 'playwright', 'ok': playwright, 'detail': str(node_path)},
-        {'id': 'login', 'ok': login_profile, 'detail': 'browser-profile 已存在' if login_profile else '尚未扫码登录'},
+        {'id': 'login', 'ok': login_profile, 'detail': profile_name + ' 已存在（不代表登录仍有效）' if login_profile else '尚未扫码登录'},
     ]
     ready = (python_ok and bool(node) and bool(chrome) and playwright
              and not missing_identity and not materials['missing'] and not materials['errors']
@@ -291,7 +293,7 @@ def setup_home(host, home, fix=False, set_materials=None, set_identity=None):
     if materials['missing'] or materials['errors']:
         next_steps.append('补充证明材料/身份截图/营业执照/话术工作簿；可把文件发到对话或告诉我文件夹')
     if not login_profile:
-        next_steps.append('运行 login，在打开的 Chrome 里扫码登录抖音')
+        next_steps.append('运行 login' + (' --kind original' if kind == 'original' else '') + '，在打开的专用 Chrome 里扫码登录抖音')
     if ready:
         next_steps.append('环境已就绪；先用 1–2 条链接做小样本测试，不要直接批量提交')
     print(json.dumps({
@@ -335,24 +337,25 @@ def browser_arguments(cfg):
     return ['--channel', channel]
 
 
-def doctor(node, cfg, env):
+def doctor(node, cfg, env, kind=None):
     if not node or not Path(node).is_file() or not os.access(node, os.X_OK):
         raise ValueError('Node.js not found or not executable; edit config.json or install Node.js 20+.')
-    for key in ['identity', 'materials']:
+    for key in ([] if kind == 'original' else ['identity', 'materials']):
         if not Path(cfg[key]).exists():
             raise ValueError(f'Missing {key}: {cfg[key]}. Run init or fix config.json.')
     node_path = Path(cfg.get('node_path', ''))
     if not node_path.is_dir() or not ((node_path / 'playwright-core').exists() or (node_path / 'playwright').exists()):
         raise ValueError(f'node_path {node_path} does not contain playwright-core; install it with npm or edit config.json.')
     warnings = []
-    try:
-        identity = read_json(cfg['identity'])
-        for kind in ('patent', 'trademark'):
-            item = identity.get(kind) or {}
-            if not item.get('organization') or not item.get('phone'):
-                warnings.append(f'identity.{kind} is incomplete')
-    except (OSError, ValueError, KeyError):
-        warnings.append('identity.json is invalid')
+    if kind != 'original':
+        try:
+            identity = read_json(cfg['identity'])
+            for identity_kind in ('patent', 'trademark'):
+                item = identity.get(identity_kind) or {}
+                if not item.get('organization') or not item.get('phone'):
+                    warnings.append(f'identity.{identity_kind} is incomplete')
+        except (OSError, ValueError, KeyError):
+            warnings.append('identity.json is invalid')
     args = browser_arguments(cfg)
     options = {'executablePath' if args[0] == '--executable-path' else 'channel': args[1]}
     # A fresh ephemeral context exercises the real browser without touching the
@@ -384,7 +387,10 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--host', required=True, choices=['codex', 'deepseek'])
     p.add_argument('action', choices=['init', 'setup', 'settings', 'doctor', 'check', 'login', 'prepare', 'run', 'self-test', 'status'])
-    p.add_argument('--kind', choices=['patent', 'trademark'])
+    p.add_argument('--kind', type=complaint_kind, choices=['patent', 'trademark', 'original'])
+    originals = p.add_mutually_exclusive_group()
+    originals.add_argument('--original-link', help='Original evidence URL explicitly assigned to all current target links')
+    originals.add_argument('--originals-file', type=Path, help='JSON object mapping every current target URL to its original URL')
     source = p.add_mutually_exclusive_group()
     source.add_argument('--links-file', type=Path)
     source.add_argument('--links-workbook', type=Path)
@@ -408,13 +414,23 @@ def main():
         p.error('submission flags only apply to run')
     if a.retry_failed and not a.submit:
         p.error('--retry-failed requires --submit')
-    if a.job and (a.links_file or a.links_workbook):
-        p.error('choose an existing job or new link input, not both')
+    if a.job and (a.links_file or a.links_workbook or a.original_link or a.originals_file):
+        p.error('choose an existing job or new link/evidence input, not both')
+    if (a.original_link or a.originals_file) and (a.kind != 'original' or a.action not in ('prepare', 'run')):
+        p.error('original evidence arguments require prepare/run --kind original')
+    if a.kind == 'original' and (a.receipt or a.video_ids or a.max_pages != 100):
+        p.error('original status is local only; qinquan history filters do not apply')
+    if (a.links_file or a.links_workbook) and a.action not in ('prepare', 'run'):
+        p.error('link input only applies to prepare/run')
+    if a.job and a.action not in ('prepare', 'run', 'status'):
+        p.error('--job only applies to prepare/run/status')
+    if a.job and a.action == 'status' and a.kind != 'original':
+        p.error('status --job requires --kind original')
     home = host_home(a.host)
     if a.action == 'settings':
         return show_settings(a.host, home)
     if a.action == 'setup':
-        return setup_home(a.host, home, a.fix, a.set_materials, a.set_identity)
+        return setup_home(a.host, home, a.fix, a.set_materials, a.set_identity, a.kind)
     if a.action == 'init':
         return init_home(a.host, home)
     if not (home / 'config.json').exists():
@@ -428,10 +444,11 @@ def main():
         raise ValueError('Host config mismatch')
     env = dict(os.environ, NODE_PATH=cfg['node_path'])
     node = cfg['node']
-    runner = str(Path(__file__).with_name('runner.mjs'))
+    runner = str(Path(__file__).with_name('original-runner.mjs' if a.kind == 'original' else 'runner.mjs'))
+    profile = home / ('original-browser-profile' if a.kind == 'original' else 'browser-profile')
     browser_args = browser_arguments(cfg)
     if a.action == 'doctor':
-        warnings = doctor(node, cfg, env)
+        warnings = doctor(node, cfg, env, a.kind)
         print(json.dumps({
             'status': 'host_ready' if not warnings else 'needs_setup',
             'host': a.host,
@@ -441,6 +458,13 @@ def main():
         }, ensure_ascii=False))
         return 0
     if a.action == 'check':
+        if a.kind == 'original':
+            print(json.dumps({'host': a.host, 'kind': 'original', 'status': 'checked_only',
+                              'required': ['explicit_target_links', 'corresponding_original_links', 'dedicated_login'],
+                              'evidence_images': 0, 'identity_required': False,
+                              'headless': True, 'system_input_used': False,
+                              'profile': str(profile)}, ensure_ascii=False))
+            return 0
         kinds = [a.kind] if a.kind else ['patent', 'trademark']
         for kind in kinds:
             job = prepare(Path(cfg['materials']), kind)
@@ -451,12 +475,15 @@ def main():
     if a.action == 'self-test':
         return subprocess.call([node, runner, '--self-test', *browser_args], env=env)
     if a.action == 'login':
-        args = [node, runner, '--login', '--profile', str(home / 'browser-profile'), *browser_args]
+        args = [node, runner, '--login', '--profile', str(profile), *browser_args]
         if not sys.stdin.isatty():
             args.append('--login-wait')
         return subprocess.call(args, env=env)
     if a.action == 'status':
-        args = [node, runner, '--history', '--profile', str(home / 'browser-profile'), '--max-pages', str(a.max_pages), *browser_args]
+        if a.kind == 'original':
+            print(json.dumps({'host': a.host, **local_original_status(home, a.job)}, ensure_ascii=False))
+            return 0
+        args = [node, runner, '--history', '--profile', str(profile), '--max-pages', str(a.max_pages), *browser_args]
         if a.receipt:
             args += ['--receipt', a.receipt]
         if a.video_ids:
@@ -469,7 +496,19 @@ def main():
     else:
         if not a.kind or not (a.links_file or a.links_workbook):
             p.error('supply --kind and an explicit link file, or --job')
-        job = prepare(Path(cfg['materials']), a.kind, a.links_file or a.links_workbook, bool(a.links_workbook))
+        if a.kind == 'original':
+            job = prepare_original(a.links_file or a.links_workbook, bool(a.links_workbook),
+                                   a.original_link, a.originals_file)
+        else:
+            job = prepare(Path(cfg['materials']), a.kind, a.links_file or a.links_workbook, bool(a.links_workbook))
+    if job.get('kind') == 'original':
+        runner = str(Path(__file__).with_name('original-runner.mjs'))
+        profile = home / 'original-browser-profile'
+        # Validate existing manifests too, before writing any task or opening a browser.
+        from original_job import validate_original_job
+        validate_original_job(job)
+    elif job.get('kind') not in ('patent', 'trademark'):
+        raise InputError('Unknown job kind')
     # A stable task path keeps repeated invocations tied to their submission state.
     job_id = hashlib.sha256(json.dumps(job, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:24]
     jobs = home / 'jobs'
@@ -482,8 +521,10 @@ def main():
     if a.action == 'prepare':
         print(json.dumps({'host': a.host, 'status': 'prepared_not_submitted', 'job': str(job_path), 'links': len(job['links'])}))
         return 0
-    args = [node, runner, '--job', str(job_path), '--identity-json', cfg['identity'],
-            '--profile', str(home / 'browser-profile'), '--state', str(jobs / (job_id + '.state.json')), *browser_args]
+    args = [node, runner, '--job', str(job_path), '--profile', str(profile),
+            '--state', str(jobs / (job_id + '.state.json')), *browser_args]
+    if job['kind'] != 'original':
+        args += ['--identity-json', cfg['identity']]
     if a.submit:
         args.append('--submit')
     if a.retry_failed:

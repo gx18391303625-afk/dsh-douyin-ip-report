@@ -8,6 +8,17 @@ config.json
 identity.json
 materials.json
 browser-profile/
+original-browser-profile/
+chrome-profile/
+ui-settings.json
+original-ledger.json
+original-runner.lock
+reports/
+recordings/
+backups/
+.env
+.env.*
+*.jsonl
 jobs/
 *.state.json
 *.state.json.jsonl

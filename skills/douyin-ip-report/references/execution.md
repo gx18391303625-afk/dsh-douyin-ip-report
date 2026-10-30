@@ -1,62 +1,88 @@
 # 执行命令与回执查询
 
-优先使用 [local-host.md](local-host.md) 中的 `host.py`。它读取本机私有配置，处理运行时、模块、专用 profile 与稳定任务路径。
+优先使用 [local-host.md](local-host.md) 的 `host.py`，统一处理私有配置、运行时、专用 profile 与稳定任务路径。以下命令在技能目录运行；路径均替换为本机实际路径。macOS/Linux 用 `python3`，Windows 用 `py -3`。
 
-## 运行时与身份
+## 原创：目标与原创分开
 
-需要 Python 3.10+、Node.js 20+、Google Chrome。建议把 `playwright-core@1.64.1` 单独装在私有目录，插件升级时不会丢：
+用户说「原创」映射到 `--kind original`（CLI 也接受 `--kind 原创`）。它访问目标视频「举报」→「搬运、抄袭作品」，把对应原创作品 URL 填入独立字段，不使用 qinquan 表单、专利/商标证据、营业执照或组织身份。
 
 ```sh
-mkdir -p ~/.dsh/douyin-report
-cd ~/.dsh/douyin-report
-npm init -y
-npm install playwright-core@1.64.1
+# 只检查原创运行环境，不要求专利/商标材料
+python3 scripts/host.py --host deepseek setup --kind original
+python3 scripts/host.py --host deepseek check --kind original
+
+# 仅在用户明确要求登录时打开专用扫码窗口
+python3 scripts/host.py --host deepseek login --kind original
+
+# 当前用户明确指定的所有目标共用一个原创作品时
+python3 scripts/host.py --host deepseek prepare --kind original --links-file '/本次目标.txt' --original-link 'https://www.douyin.com/video/<原创ID>'
+
+# 各目标有不同原创作品时
+python3 scripts/host.py --host deepseek prepare --kind original --links-file '/本次目标.txt' --originals-file '/本次原创映射.json'
+
+# 使用 prepare 返回的任务路径；不必再指定类型或原创链接
+python3 scripts/host.py --host deepseek run --job '<私有目录>/jobs/<job>.json'
 ```
 
-然后把 `config.json` 的 `node_path` 指向 `~/.dsh/douyin-report/node_modules`。
+`--originals-file` 是 JSON 对象，键为规范化目标视频 URL，值为规范化原创视频 URL：
 
-私有 `identity.json` 的结构为：
+```json
+{
+  "https://www.douyin.com/video/<目标ID1>": "https://www.douyin.com/video/<原创ID1>",
+  "https://www.douyin.com/video/<目标ID2>": "https://www.douyin.com/video/<原创ID2>"
+}
+```
+
+先解析分享短链为完整视频 URL，去掉查询参数后建立映射。占位符不是可执行目标。每个目标必须有用户本次明确提供或当前已知且经用户确认的对应原创；缺失、冲突或角色不明先问。`--original-link` 只用于用户明确限定的当前目标集合，不能将旧演示原创套给新目标。不要同时提供两种原创来源。
+
+`prepare` 永不提交；`run` 可直接带相同输入参数，也可用 `--job`，默认无头填表/核验后关闭。原创使用独立 `original-browser-profile`；登录不复用 qinquan profile。不得使用系统输入/剪贴板，不得因无头失败自动改有头；只有明确的用户登录动作允许扫码窗口。
+
+## 专利 / 商标：运行时与材料
+
+需要 Python 3.10+、Node.js 20+、Chrome 和 `playwright-core`。经授权安装依赖时可将 `playwright-core@1.64.1` 放在私有目录，并在配置中将 `node_path` 指向其 `node_modules`；不要装进插件包。私有 `identity.json` 示例：
 
 ```json
 {"patent":{"organization":"组织名称","phone":"联系电话","email":""},"trademark":{"organization":"另一组织名称","phone":"联系电话","email":""}}
 ```
 
-使用对应身份截图核对真实值；空邮箱保持空白。不要把示例文字当作真实身份。身份文件和资料不随插件分发。
-
-## 准备本次输入
-
-以下底层命令在技能目录运行；将路径替换为本机实际绝对路径。
+示例文字不是身份。核验真实组织及营业执照，空邮箱保持空白。资料格式见 [materials.md](materials.md)。
 
 ```sh
-python3 scripts/prepare_job.py --materials '<资料目录>' --kind patent --check-only
-python3 scripts/prepare_job.py --materials '<资料目录>' --kind trademark --links-file '<本次链接.txt>' --out '<私有目录>/job.json'
+python3 scripts/host.py --host deepseek check
+python3 scripts/host.py --host deepseek prepare --kind patent --links-file '/本次链接.txt'
+python3 scripts/host.py --host deepseek prepare --kind trademark --links-workbook '/本次链接.xlsx'
+python3 scripts/host.py --host deepseek login
+python3 scripts/host.py --host deepseek run --job '<私有目录>/jobs/<job>.json'
 ```
 
-也支持 `--links-workbook` 读取用户明确指定的两列链接工作簿。两类分别生成任务。仅有空模板时不创建举报任务；输出不覆盖已有文件。
+专利/商标分开生成任务，不把两列工作簿自动套用于原创。仅有空模板时不创建任务，不覆盖已有输入。底层 `prepare_job.py`、`runner.mjs` 是专利/商标既有入口；原创优先经 `host.py` 分派，不沿用其 qinquan 参数。
 
-## 登录与执行
+## 提交与重试
+
+明确粘贴本次目标并指定类型可按本批请求准备/执行；「只准备」「检查」或环境安装不授权提交。先运行 `host.py settings`：默认 `confirm_before_submit: true`，汇总范围与依据后等用户确认；false 时按本批授权执行，仍先准备核对。读取失败按 true，不得自行改开关。
 
 ```sh
-node scripts/runner.mjs --login --profile '<私有目录>/browser-profile' --channel chrome
-node scripts/runner.mjs --job '<私有目录>/job.json' --identity-json '<私有目录>/identity.json' --profile '<私有目录>/browser-profile' --state '<私有目录>/job-state.json' --channel chrome
+# 仅在本批已授权且已满足确认设置时
+python3 scripts/host.py --host deepseek run --job '<同一任务.json>' --submit
 ```
 
-扫码完成后回到终端按 Enter；在无终端的 agent / 后台运行中加 `--login-wait`（`host.py login` 会自动加），执行器会轮询登录表单并在扫码成功后自动保存，不需要 Enter。正常执行默认无头模式，不抢系统鼠标键盘；`--headed` 仅供用户接受可见窗口的调试。可用 `--executable-path` 指定实际 Chrome 路径，优先于 `--channel`。
+状态文件防重复，不得删除或更换路径绕过。部分接收不重投整批；`--retry-failed --submit` 仅用于执行器确认失败的同一任务。`submitted_unknown`、uncertain/结果不明不能自动重试；表单清空不是成功证据。
 
-第二条默认只填写并检查，随后关闭浏览器。用户明确要求举报或提交本批链接时，在相同命令添加 `--submit`。执行器记录点击与提交状态，空表单不算明确成功。结果未核验时查询历史，不自动重试；明确失败的同一任务可按授权追加 `--retry-failed --submit`。
-
-## 查询回执与原举报
+## 查询：两条通道分开
 
 ```sh
-node scripts/runner.mjs --history --profile '<私有目录>/browser-profile' --channel chrome
-node scripts/runner.mjs --receipt '<实际批次编号>' --video-ids '<视频ID.txt>' --profile '<私有目录>/browser-profile' --channel chrome
+# 专利/商标 qinquan 平台历史，均只读
+python3 scripts/host.py --host deepseek status
+python3 scripts/host.py --host deepseek status --receipt '<实际批次编号>' --video-ids '/视频ID.txt'
+
+# 原创只读本地状态，可选 --job 限定任务；不是平台回执查询
+python3 scripts/host.py --host deepseek status --kind original
+python3 scripts/host.py --host deepseek status --kind original --job '<原创任务.json>'
 ```
 
-或通过 `host.py status` 使用同样参数。`视频ID.txt` 每行一个纯数字视频 ID。指定 `--receipt` 时只查询该批次；省略它并提供 `--video-ids` 时，扫描历史批次以查找原记录。查询不点击提交，不撤销举报。
+qinquan 历史与回执有分页，共享 `--max-pages` 默认 100、最大 200；`complete: false` 或 `history_partial` 表示扫描不完整。`targets[].original_status` 是专利/商标原举报记录的核对字段，**不是 `original` 原创类型的回执**；只有直接读取到的记录才能作为依据。
 
-历史和回执有分页，共享读取上限 `--max-pages`，默认 100、最大 200。输出 `complete: false` 或 `history_partial` 时说明扫描不完整；不能将未找到的目标推断为已通过或不存在。`targets[].original_status` 只有在读取到原记录的直接证据且状态一致时才给出，否则为 `unknown`；用 `records` 核对依据。
-
-遇到「24 小时内已举报过」时，当前批次只证明本次重复提交失败。用相同视频 ID 在原批次中查询，才可报告原举报状态。输出中有查询时间；“审核中”只对应查询当时。批次“已完成”也不能替代每个视频的处理结果。
+「24 小时内已举报过」只证明本次重复提交被拒，需按视频 ID 回查对应原记录才能报告状态。批次完成不等于每个目标成功，平台接收不代表审核通过。原创单独汇报本地状态、直接页面证据及待核验项；qinquan 查询不能确认原创举报，不编造回执号或审核结果。
 
 ## 自测与验证边界
 
@@ -64,4 +90,4 @@ node scripts/runner.mjs --receipt '<实际批次编号>' --video-ids '<视频ID.
 node scripts/runner.mjs --self-test --channel chrome
 ```
 
-自测在本地合成页面执行，不请求抖音。它检查页面交互和停止条件，不证明目标电脑已登录或平台已接收举报。真实页面已验证的流程见 [workflow.md](workflow.md)；平台改版后需要按实际页面重新校准。
+既有自测在本地合成页面运行，不请求抖音，不证明账号已登录或平台已接收。专利/商标真实页面验证范围见 [workflow.md](workflow.md)，不自动适用于原创。平台改版或定位失败应停止，不猜测、不回退系统输入或有头执行。
