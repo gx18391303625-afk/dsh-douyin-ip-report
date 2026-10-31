@@ -171,7 +171,9 @@ export async function videoReportControl(page, videoId) {
   const token = `original-${crypto.randomUUID()}`;
   // Start from the actual visible video, never a user-card/report-user menu.
   // Fail closed if multiple visible videos or no tight content-scoped control exists.
-  const scoped = await page.evaluate(({ token }) => {
+  // The player renders asynchronously after domcontentloaded, so retry the same
+  // fail-closed check with a bounded wait; never relax the scoping rules.
+  const scopeOnce = () => page.evaluate(({ token }) => {
     const visible = element => !!element.getClientRects().length && getComputedStyle(element).visibility !== 'hidden';
     const videos = [...document.querySelectorAll('video')].filter(visible);
     if (videos.length !== 1) return false;
@@ -189,6 +191,12 @@ export async function videoReportControl(page, videoId) {
     }
     return false;
   }, { token });
+  let scoped = false;
+  const deadline = Date.now() + 25000;
+  while (!scoped && Date.now() < deadline) {
+    scoped = await scopeOnce();
+    if (!scoped) await page.waitForTimeout(500);
+  }
   if (!scoped) stop('UI_UNCALIBRATED', 'Cannot uniquely scope 举报 to the target video content (never report a user).');
   return unique(page.locator(`[data-original-report-control="${token}"]`), 'video report control');
 }
@@ -208,13 +216,36 @@ export async function reportDialog(page) {
   if (!scoped) stop('UI_UNCALIBRATED', 'No tightly scoped video report dialog was found.');
   return unique(page.locator(`[data-original-report-dialog="${token}"]`), 'video report dialog');
 }
+// The visible label text is not the control: Douyin renders a custom radio
+// circle to its left. Click that circle, verify the original-URL field really
+// appears, and fall back to toggling the underlying input once. Fail closed.
+export async function selectOriginalReason(page, dialog) {
+  const reason = await unique(dialog.getByText(REASON, { exact: true }), 'original-work reason');
+  const field = dialog.getByPlaceholder(ORIGINAL_PLACEHOLDER, { exact: true });
+  const ready = async () => (await field.count()) > 0 && await field.first().isVisible().catch(() => false);
+  const settle = async () => { for (let i = 0; i < 8 && !await ready(); i++) await page.waitForTimeout(400); };
+  if (!await ready()) {
+    const box = await reason.boundingBox();
+    if (box) await page.mouse.click(box.x - 18, box.y + box.height / 2);
+    await settle();
+  }
+  if (!await ready()) {
+    await reason.evaluate(element => {
+      const row = element.closest('label') || element.parentElement;
+      const radio = row?.querySelector('input[type="radio"]');
+      if (radio) radio.click();
+      else (element.closest('[role="radio"]') || element).click();
+    });
+    await settle();
+  }
+  if (!await ready()) stop('FORM_UNVERIFIED', 'Original-work reason did not reveal the original URL field.');
+  return field;
+}
 export async function prepareReport(page, entry) {
   await assertNoChallenge(page);
   await (await videoReportControl(page, entry.videoId)).click();
   const dialog = await reportDialog(page);
-  const reason = await unique(dialog.getByText(REASON, { exact: true }), 'original-work reason');
-  await reason.click();
-  const field = await unique(dialog.getByPlaceholder(ORIGINAL_PLACEHOLDER, { exact: true }), 'original URL textbox');
+  const field = await selectOriginalReason(page, dialog);
   await field.fill(entry.originalUrl);
   if (await field.inputValue() !== entry.originalUrl) stop('FORM_UNVERIFIED', 'Original URL was changed or lost.');
   if (canonicalVideo(page.url()).videoId !== entry.videoId) stop('TARGET_MISMATCH', 'Target changed while preparing the report.');
@@ -224,7 +255,7 @@ export async function prepareReport(page, entry) {
   return button;
 }
 const SUCCESS = /^(?:举报成功|提交成功|举报已提交|举报提交成功)[。！!\s]*$/;
-const REJECTED = /^(?:举报提交失败|提交失败|提交未成功|未提交成功|提交出错|举报失败|24\s*小时内已举报过|你已举报过该视频|您已举报过该视频)(?:$|[，,。！!：:\s])/;
+const REJECTED = /^(?:举报提交失败|提交失败|提交未成功|未提交成功|提交出错|举报失败|24\s*小时内已举报过|你已举报过该视频|您已举报过该视频|你已举报过该内容|您已举报过该内容)(?:$|[，,。！!：:\s])/;
 export function classifyReceipt(texts, baseline = []) {
   const old = new Set(baseline.map(text => text.trim()));
   const fresh = texts.map(text => text.trim()).filter(text => text && !old.has(text));
@@ -240,9 +271,28 @@ export async function receiptTexts(page) {
   // containing one of these phrases. Dialog disappearance is deliberately ignored.
   return page.getByText(new RegExp(`${SUCCESS.source}|${REJECTED.source}`)).filter({ visible: true }).allTextContents();
 }
-export async function waitForReceipt(page, baseline, timeout = 15000) {
+// The visible confirmation is frequently a transient toast, so also read the
+// platform's own submit response. status_code 0 = accepted, 2159 = this account
+// already reported the item (the earlier submission is what registered).
+export function watchSubmitApi(page) {
+  let payload = null;
+  const onResponse = async (response) => {
+    if (!/\/aweme\/v1\/report\/submit\//.test(response.url())) return;
+    try { payload = { ...(await response.json()) }; }
+    catch { payload = { status_code: null, status_msg: 'Submit response was not readable JSON.' }; }
+  };
+  page.on?.('response', onResponse);
+  return { value: () => payload, dispose: () => page.off?.('response', onResponse) };
+}
+export async function waitForReceipt(page, baseline, timeout = 15000, api = null) {
   const end = Date.now() + timeout;
   do {
+    const payload = api && api.value();
+    if (payload) {
+      if (payload.status_code === 0) return { status: 'success', receipt: payload.status_msg || 'Platform accepted the report (status_code 0).' };
+      if (payload.status_code === 2159) return { status: 'rejected', receipt: payload.status_msg || 'Platform reported a duplicate (status_code 2159).' };
+      return { status: 'unknown', receipt: payload.status_msg || `Platform returned status_code ${payload.status_code}.` };
+    }
     const result = classifyReceipt(await receiptTexts(page), baseline);
     if (result.status !== 'unknown' || result.receipt) return result;
     if (Date.now() >= end) return result;
@@ -361,14 +411,19 @@ export async function run(options, dependencies = {}) {
       await record(entry, 'prepared');
       if (options.submit) {
         const baseline = await (dependencies.receiptTexts || receiptTexts)(page);
-        await record(entry, 'submitting', { attempt: (state.targets[entry.videoId].attempt || 0) + 1, receipt: null });
-        // From this point any exception is unknown, including a click timeout.
-        await button.click();
-        await record(entry, 'unknown');
-        const result = await (dependencies.waitForReceipt || waitForReceipt)(page, baseline);
-        if (!['success', 'rejected', 'unknown'].includes(result.status)) stop('RECEIPT_INVALID', 'Unexpected receipt classification.');
-        if (result.status === 'success') submittedThisRun++;
-        await record(entry, result.status, { receipt: result.receipt });
+        const api = (dependencies.watchSubmitApi || watchSubmitApi)(page);
+        try {
+          await record(entry, 'submitting', { attempt: (state.targets[entry.videoId].attempt || 0) + 1, receipt: null });
+          // From this point any exception is unknown, including a click timeout.
+          await button.click();
+          await record(entry, 'unknown');
+          const result = await (dependencies.waitForReceipt || waitForReceipt)(page, baseline, 15000, api);
+          if (!['success', 'rejected', 'unknown'].includes(result.status)) stop('RECEIPT_INVALID', 'Unexpected receipt classification.');
+          if (result.status === 'success') submittedThisRun++;
+          await record(entry, result.status, { receipt: result.receipt });
+        } finally {
+          api.dispose?.();
+        }
       }
       active = null;
     }
