@@ -26,3 +26,10 @@ jobs/
 # Python bytecode
 __pycache__/
 *.pyc
+
+# 本地素材族库（私有数据，不进仓库）
+families/
+known-negative.json
+family-fingerprints.json
+fingerprints*.json
+clusters*.json

@@ -35,6 +35,9 @@
       "creator_observed": "页面名称",
       "video_url": "https://www.douyin.com/video/目标数字ID",
       "video_id": "目标数字ID",
+      "title": "视频标题原文（未知填 null，不要省略）",
+      "duration_seconds": 54.1,
+      "frame_hash": null,
       "kind": "original",
       "review_state": "needs_review",
       "product_match": null,
@@ -57,7 +60,9 @@
 }
 ```
 
-未知值使用 `null`。商标记录的 `original_url` 为空。每条原创候选必须能明确关联一个当前参考原创，存在多个可能来源时保留 `needs_review`。以视频 ID 去重，多个类型的命中可分别记录，执行范围依据本批要求确定。
+未知值使用 `null`。`title`、`duration_seconds`、`frame_hash` 用于素材族聚类与跨批次去重
+（见 [聚类说明](clustering.md)），整理时不要丢掉；`frame_hash` 为 64 位帧/封面 dHash 的 16 位十六进制字符串，
+没有就填空。商标记录的 `original_url` 为空。每条原创候选必须能明确关联一个当前参考原创，存在多个可能来源时保留 `needs_review`。以视频 ID 去重，多个类型的命中可分别记录，执行范围依据本批要求确定。
 
 ## 执行输入
 

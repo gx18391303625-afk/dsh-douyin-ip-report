@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.8.0 — 2026-11-04
+
+### 新增
+
+- 新增达人线索发现技能 `find-douyin-ip-links`：按达人名称在抖音电商罗盘检索、逐条核对实际画面、区分商标与原创线索，产出 `discovery.json`、`trademark-targets.txt`、`original-targets.txt`、`originals.json` 交接给举报流程。
+- 新增素材族聚类工具 `skills/find-douyin-ip-links/scripts/families.py`（纯标准库，无第三方依赖）：
+  - 按「时长容差 + 帧哈希汉明距离或标题相似度」把同一段素材的重复投稿折叠成素材族，每族只需实际核对 1 条；
+  - 命中已知排除族输出 `skip`、命中已确认候选族输出 `inherit_candidate`、其余 `review`；
+  - `learn` 把一次人工结论沉淀进本地素材族库（`known-negative.json` / `family-fingerprints.json`），跨批次复用；
+  - 内置 `selftest`，对并族、拒绝误并、库命中等行为做断言。
+- 新增 `scripts/framehash.py`（可选，需要 Pillow）：把已有封面/截图转成 64 位 dHash，供聚类使用；缩放+重压缩后哈希通常只差 1–2 位，可作为同素材判据。
+- 新增 `references/clustering.md`：说明信号采集、哈希生成、聚类动作语义与素材族库维护。
+- `references/handoff.md` 的记录结构新增 `title`、`duration_seconds`、`frame_hash` 三个字段，避免在整理阶段丢掉聚类与去重所需信号。
+
+### 安全边界
+
+- 只有时长重合、既无帧哈希也无标题佐证的族**不会**自动跳过，只标为「可能同族」并要求实核，防止把"没采到信号"误判成"已排除"。
+- 时长未知且无标题的条目不会互相并族，避免堆成巨族后静默跳过。
+- 素材族库属于本地私有数据，不随插件分发；`.gitignore` 已覆盖运行期私有目录。
+
+### 验证
+
+- `python3 scripts/families.py selftest` 通过。
+- 用一批 87 条真实已核视频（同一店铺、近30天）验证：聚成 11 个素材族，其中最大一族 63 条（72%）确为同一段约 54 秒素材的重复投稿；反例测试中同长度但哈希与标题均不同的视频不会被并入该族。
+- 未在插件 UI 中暴露聚类功能，仅作为技能脚本使用。
+
 ## 0.7.1 — 2026-10-31
 
 ### 修复

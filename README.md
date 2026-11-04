@@ -15,6 +15,33 @@ DeepSeek Harness 的抖音专利 / 商标 / **原创**举报插件：核对**用
 - **智能体预设**：v0.4.0 起在 Agent preset 选择器里提供「抖音侵权举报」，选中后直接粘贴分享口令/链接即可开始。
 - **首次安装检查**：v0.5.0 起预设支持「开始检查」，自动检查 Python/Node/Chrome/Playwright/身份/材料/登录，缺什么列什么。
 
+## 找人：达人线索发现 + 素材族聚类（v0.8.0）
+
+举报之前往往先要"找到侵权链接"。`find-douyin-ip-links` 技能按达人名称在抖音电商罗盘检索，
+用参考图与实际画面核对，分成商标线索（画面能辨认你的商标）和原创线索（与你的原创作品具体镜头对应），
+输出 `discovery.json` / `trademark-targets.txt` / `original-targets.txt` / `originals.json` 直接喂给举报流程。
+
+这类账号最典型的特征是**同一段素材反复重编码上传**（同一天同分钟好几条、时长只差 0.1 秒）。
+v0.8.0 附带纯标准库脚本 `skills/find-douyin-ip-links/scripts/families.py`，先聚类再核对：
+
+```sh
+# 列表阶段采集 video_id / duration_seconds / title（可选 frame_hash）后聚类
+python3 scripts/families.py cluster --fingerprints fingerprints.json \
+  --library ~/Documents/抖音举报/素材族库 --json-out clusters.json --md-out clusters.md
+
+# 核完一族，把结论沉淀进本地素材族库，下一批直接受益
+python3 scripts/families.py learn --library ~/Documents/抖音举报/素材族库 \
+  --fingerprints fingerprints.json --members ID1,ID2 --family-id elevator-clip \
+  --verdict excluded --label "电梯口 蓝围巾 DOUBLE WARMTH" --reason "无本批商标，且无原创对应镜头"
+```
+
+每族输出一个动作：`skip`（命中已知排除族，不必打开）、`inherit_candidate`（命中已确认候选族，抽 1 条复核）、
+`review`（新族，实核代表视频）。安全边界：**只有时长重合、没有帧哈希或标题佐证的族不会自动跳过**，
+只标为"可能同族"并要求实核，避免把"没采到信号"误判成"已排除"。
+
+`scripts/framehash.py` 可把已有封面/截图转成 64 位 dHash（需要 Pillow）。
+素材族库属于本地私有数据，不随插件分发；详见 `skills/find-douyin-ip-links/references/clustering.md`。
+
 ## 第一次安装：说「开始检查」（v0.5.0）
 
 在「抖音侵权举报」预设的新会话里，第一句发 **“开始检查”**。它会运行 `host.py setup`，逐项检查：

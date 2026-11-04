@@ -1,7 +1,7 @@
 {
   "name": "dsh-douyin-ip-report",
-  "version": "0.7.1",
-  "description": "抖音专利/商标/原创举报：链接加类型识别，原创搬运抄袭后台执行、不抢鼠标键盘，本地任务及回执状态",
+  "version": "0.8.0",
+  "description": "抖音专利/商标/原创举报：链接加类型识别，原创搬运抄袭后台执行、不抢鼠标键盘，本地任务及回执状态；含达人线索发现与素材族聚类",
   "license": "MIT",
   "type": "module",
   "main": "lib/index.js",
