@@ -237,15 +237,19 @@ test('corrupt ledger is fail-closed and fingerprint mismatch cannot use another 
   await rejectsCode(() => run(f.options, mockBrowser().dependencies), 'JSON_INVALID');
 });
 
-function uiMock({ reportScope = true, dialogRole = true, reasonCount = 1, submitEnabled = true, readback = ORIGINAL } = {}) {
-  const calls = { report: 0, reason: 0, submit: 0, filled: null, videoScoped: false };
+function uiMock({ reportScope = true, dialogRole = true, reasonCount = 1, submitEnabled = true, readback = ORIGINAL, clock } = {}) {
+  const calls = { report: 0, reason: 0, submit: 0, filled: null, videoScoped: false, scopeChecks: 0, waits: [] };
+  let fieldVisible = false;
   function locator(count = 1, methods = {}) {
-    const loc = { filter() { return this; }, async count() { return count; }, async waitFor() { if (!count) throw new Error('Timeout'); }, ...methods };
+    const loc = { filter() { return this; }, first() { return this; }, async count() { return count; }, async waitFor() { if (!count) throw new Error('Timeout'); }, ...methods };
     return loc;
   }
   const submit = locator(1, { async isEnabled() { return submitEnabled; }, async click() { calls.submit++; } });
-  const field = locator(1, { async fill(value) { calls.filled = value; }, async inputValue() { return readback; } });
-  const reason = locator(reasonCount, { async click() { calls.reason++; } });
+  const field = locator(1, { async isVisible() { return fieldVisible; }, async fill(value) { calls.filled = value; }, async inputValue() { return readback; } });
+  const reason = locator(reasonCount, {
+    async boundingBox() { return { x: 30, y: 40, width: 120, height: 20 }; },
+    async click() { assert.fail('Click the radio circle, not the reason label text.'); },
+  });
   const dialog = locator(1, {
     getByText(text) { assert.equal(text, REASON); return reason; },
     getByPlaceholder(text) { assert.equal(text, ORIGINAL_PLACEHOLDER); return field; },
@@ -253,7 +257,14 @@ function uiMock({ reportScope = true, dialogRole = true, reasonCount = 1, submit
   });
   const page = {
     url: () => TARGET,
-    async evaluate(_fn, data) { assert.ok(data.token.startsWith('original-')); calls.videoScoped = true; return reportScope; },
+    mouse: { async click(x, y) { assert.equal(x, 12); assert.equal(y, 50); calls.reason++; fieldVisible = true; } },
+    async waitForTimeout(milliseconds) {
+      assert.ok(clock, 'Waiting mocks must provide a logical clock; never busy-spin in real time.');
+      assert.equal(milliseconds, 500);
+      calls.waits.push(milliseconds);
+      clock.now += milliseconds;
+    },
+    async evaluate(_fn, data) { assert.ok(data.token.startsWith('original-')); calls.videoScoped = true; calls.scopeChecks++; return reportScope; },
     locator(selector) {
       if (selector === 'body') return { async innerText() { return 'offline video content'; } };
       if (selector.startsWith('[data-original-report-control=')) return locator(1, { async click() { calls.report++; } });
@@ -273,9 +284,17 @@ test('UI preparation uses video-scoped report, exact original reason/placeholder
   assert.equal(mock.calls.filled, ORIGINAL); assert.equal(mock.calls.submit, 0); assert.equal(mock.calls.videoScoped, true);
 });
 
-test('UI guards refuse wrong target, unscoped report-user control, ambiguous reason and lost URL', async () => {
+test('UI guards refuse wrong target, unscoped report-user control, ambiguous reason and lost URL', async t => {
+  const clock = { now: 0 };
+  t.mock.method(Date, 'now', () => clock.now);
   await rejectsCode(() => videoReportControl(uiMock().page, '999'), 'TARGET_MISMATCH');
-  await rejectsCode(() => videoReportControl(uiMock({ reportScope: false }).page, '1000000000000000001'), 'UI_UNCALIBRATED');
+  const unscoped = uiMock({ reportScope: false, clock });
+  await rejectsCode(() => videoReportControl(unscoped.page, '1000000000000000001'), 'UI_UNCALIBRATED');
+  assert.equal(clock.now, 25000, 'Scoping must fail closed only after the bounded logical deadline.');
+  assert.equal(unscoped.calls.scopeChecks, 50);
+  assert.equal(unscoped.calls.waits.length, 50);
+  assert.equal(unscoped.calls.report, 0);
+  assert.equal(unscoped.calls.submit, 0);
   await rejectsCode(() => prepareReport(uiMock({ reasonCount: 2 }).page, { videoId: '1000000000000000001', originalUrl: ORIGINAL }), 'UI_UNCALIBRATED');
   await rejectsCode(() => prepareReport(uiMock({ readback: 'changed' }).page, { videoId: '1000000000000000001', originalUrl: ORIGINAL }), 'FORM_UNVERIFIED');
   await rejectsCode(() => prepareReport(uiMock({ submitEnabled: false }).page, { videoId: '1000000000000000001', originalUrl: ORIGINAL }), 'FORM_UNVERIFIED');
