@@ -1,0 +1,4 @@
+interface:
+  display_name: "抖音侵权线索查找"
+  short_description: "按达人检索抖音视频，核对产品与原创素材并整理举报链接和匹配依据"
+  default_prompt: "使用 $find-douyin-ip-links，按我提供的达人、产品参考图或原创视频查找疑似侵权链接，整理匹配依据和原创对应关系。"
