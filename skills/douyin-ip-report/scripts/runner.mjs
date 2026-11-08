@@ -243,16 +243,50 @@ export async function recognizedIds(page) {
     return ids.length === total && new Set(ids).size === total ? ids : [];
   });
 }
-async function waitForRecognition(page, job, timeout = 30000) {
-  const requested = job.links.map(link => new URL(link).pathname.match(/^\/video\/(\d+)$/)?.[1]).filter(Boolean);
+async function recognitionSnapshot(page) {
+  const ids = await recognizedIds(page);
+  const body = await page.locator('body').innerText();
+  const total = Number(body.match(/共成功识别\s*(\d+)\s*条/)?.[1] ?? NaN);
+  const failed = Number(body.match(/失败\s*(\d+)\s*条/)?.[1] ?? 0);
+  return { ids, total: Number.isSafeInteger(total) ? total : null, failed };
+}
+function requestedVideoIds(job) {
+  return job.links.map(link => new URL(link).pathname.match(/^\/video\/(\d+)$/)?.[1]).filter(Boolean);
+}
+// The platform silently drops links it cannot resolve (deleted/private videos) and
+// links reported by this account within 24 hours. Failing the whole batch on that is
+// wrong: it made every batch containing one dead link unresubmittable. Recognize the
+// surviving subset, report the dropped links explicitly, and only stop when the
+// platform recognized nothing at all (nothing to submit).
+export async function waitForRecognition(page, job, timeout = 30000) {
+  const requested = requestedVideoIds(job);
   const end = Date.now() + timeout;
+  let stable = null;
   while (Date.now() < end) {
     await assertNoChallenge(page);
-    const ids = await recognizedIds(page);
-    if (ids.length === job.links.length && requested.every(id => ids.includes(id))) return ids;
+    const snapshot = await recognitionSnapshot(page);
+    if (snapshot.ids.length === job.links.length && snapshot.ids.length === snapshot.total &&
+        (!requested.length || requested.every(id => snapshot.ids.includes(id)))) {
+      return { complete: true, recognizedIds: snapshot.ids, skippedIds: [], skippedCount: 0 };
+    }
+    // A partial result is final once the summary total, the dropped-link count and the
+    // recognized rows agree and stop changing. Never submit while recognition runs on.
+    const settled = snapshot.ids.length > 0 && snapshot.total === snapshot.ids.length &&
+      snapshot.failed > 0 && snapshot.ids.length + snapshot.failed >= job.links.length;
+    if (settled) {
+      const key = snapshot.ids.join(',');
+      if (stable?.key !== key) stable = { key, ids: snapshot.ids, since: Date.now() };
+      else if (Date.now() - stable.since >= 4000) break;
+    } else stable = null;
     await page.waitForTimeout(500);
   }
-  stop('RECOGNITION_UNVERIFIED', 'Could not verify that all supplied links were recognized. Inspect the page and calibrate result selectors before submitting.');
+  const ids = stable?.ids || (await recognitionSnapshot(page)).ids;
+  if (!ids.length) {
+    stop('RECOGNITION_UNVERIFIED', 'The platform recognized none of the supplied links (removed, private, or reported within 24 hours); nothing was submitted.');
+  }
+  const skippedIds = requested.filter(id => !ids.includes(id));
+  return { complete: false, recognizedIds: ids, skippedIds,
+    skippedCount: Math.max(skippedIds.length, job.links.length - ids.length) };
 }
 export async function waitForUploadEvidence(page, job, timeout = 30000, labels = ['证明材料']) {
   const names = job.evidence.map(record => path.basename(record.path)).sort();
@@ -338,7 +372,16 @@ export async function prepareForm(page, job, identity, { identityStep = true, ti
   await selectComplaintKind(page, job.kind);
   await (await complaintLinksField(page)).fill(browserLinkText(job));
   await clickText(page, ['开始识别']);
-  await waitForRecognition(page, job, timeout);
+  const recognition = await waitForRecognition(page, job, timeout);
+  const recognizedLinks = job.links.filter(link => {
+    const id = new URL(link).pathname.match(/^\/video\/(\d+)$/)?.[1];
+    return !id || recognition.recognizedIds.includes(id);
+  });
+  // The platform may rewrite the pasted list down to the links it recognized.
+  const expectedLinkValues = new Set([browserLinkText(job)]);
+  if (recognizedLinks.length && recognizedLinks.length !== job.links.length) {
+    expectedLinkValues.add(browserLinkText({ links: recognizedLinks }));
+  }
   await fillField(page, job.description, {
     labels: ['遇到的侵权问题'],
     placeholders: [REPORT_KINDS[job.kind].placeholder],
@@ -350,10 +393,11 @@ export async function prepareForm(page, job, identity, { identityStep = true, ti
   // Identity creation may navigate away and back. Require the original form data
   // and recognition results still to be present before enabling final submission.
   await verifyReportKind(page, job.kind);
-  if (await complaintLinksValue(page) !== browserLinkText(job)) stop('FORM_UNVERIFIED', 'Complaint links were changed or lost during identity selection.');
+  if (!expectedLinkValues.has(await complaintLinksValue(page))) stop('FORM_UNVERIFIED', 'Complaint links were changed or lost during identity selection.');
   const descriptions = await page.locator('textarea,input[type=text],input:not([type])').evaluateAll(els => els.map(el => el.value));
   if (!descriptions.includes(job.description)) stop('FORM_UNVERIFIED', 'Complaint description was changed or lost during identity selection.');
-  await waitForRecognition(page, job, timeout);
+  const rechecked = await waitForRecognition(page, job, timeout);
+  if (rechecked.recognizedIds.length < recognition.recognizedIds.length) stop('FORM_UNVERIFIED', 'Recognition results shrank during identity selection.');
   await waitForUploadEvidence(page, job, timeout);
   const notice = page.getByRole('checkbox', { name: /已知悉。材料转送需知/ });
   const checkbox = await unique(notice, 'material forwarding acknowledgement');
@@ -364,7 +408,7 @@ export async function prepareForm(page, job, identity, { identityStep = true, ti
   }
   await assertNoChallenge(page);
   if (!await checkbox.isChecked()) stop('FORM_UNVERIFIED', 'The required acknowledgement was not checked.');
-  return unique(page.getByRole('button', { name: '提交', exact: true }), 'final submit button');
+  return { button: await unique(page.getByRole('button', { name: '提交', exact: true }), 'final submit button'), recognition };
 }
 export async function outcome(page, baseline = '') {
   // Never interpret the static notice “无法识别...24小时内重复举报” as submission failure.
@@ -644,8 +688,16 @@ export async function main(argv = process.argv.slice(2)) {
     page.setDefaultTimeout(15000);
     await page.goto(REPORT_URL, { waitUntil: 'domcontentloaded' });
     await requireReportForm(page, 'LOGIN_REQUIRED');
-    const submit = await prepareForm(page, job, identity);
+    const { button: submit, recognition } = await prepareForm(page, job, identity);
     if (!await submit.isEnabled()) stop('FORM_UNVERIFIED', 'Final submit is disabled; required inputs may be incomplete.');
+    if (!recognition.complete) {
+      // Record the dropped links so an operator can re-check them instead of
+      // treating the batch as silently complete.
+      state.recognized_count = recognition.recognizedIds.length;
+      state.skipped_links = recognition.skippedIds;
+      state.skipped_count = recognition.skippedCount;
+      state.skipped_reason = 'Not recognized by the platform (removed, private, or reported within 24 hours).';
+    }
     await save('prepared');
     if (options.submit) {
       const baseline = await page.locator('body').innerText();
@@ -661,7 +713,8 @@ export async function main(argv = process.argv.slice(2)) {
       }
       await save(result);
     }
-    console.log(JSON.stringify({ status: state.status, kind: job.kind, links: job.links.length, evidence_images: job.evidence.length, attempt: state.attempt, submitted: state.status === 'submitted' }));
+    console.log(JSON.stringify({ status: state.status, kind: job.kind, links: job.links.length, recognized: recognition.recognizedIds.length,
+      skipped: recognition.skippedCount, evidence_images: job.evidence.length, attempt: state.attempt, submitted: state.status === 'submitted' }));
   } catch (e) {
     if (state && !FINAL_STATES.has(state.status) && state.status !== 'failed') await save(afterClick ? 'submission_clicked_unverified' : 'preparation_failed');
     throw e;
@@ -753,7 +806,31 @@ export async function selfTest(channelOptions = {}) {
       [['', '正在审核']], 'Five-column receipt rows must still parse');
     assert.deepEqual(receiptRows([['视频/图集', 'https://www.douyin.com/video/123', '待补充材料', '补充原因', '详情', '查看']]).map(row => [row.reason, row.detail]),
       [['补充原因', '详情']], 'Six-column receipt rows with 补充原因 must parse');
-    console.log(JSON.stringify({ status: 'tests_passed', tests: ['manifest_hash_check', 'duplicate_submission_guard', 'failed_retry_guard', 'mock_form_prepare_without_submit', 'scoped_file_upload', 'recognized_video_ids', 'explicit_failure', 'static_notice_not_failure', 'explicit_success', 'ambiguous_input_stop', 'ambiguous_section_stop', 'default_category_login', 'rich_text_multiline_readback', 'default_to_patent', 'default_to_trademark', 'unchanged_category_stop', 'ambiguous_editor_stop', 'receipt_columns'], live_requests: 0 }));
+    // Dead links are dropped by the platform, not by us: one surviving link must still prepare.
+    const twoLinkJob = { ...job, links: ['https://www.douyin.com/video/123', 'https://www.douyin.com/video/999'] };
+    await page.setContent(mockForm(true));
+    await page.evaluate(() => {
+      document.querySelector('#recognize').onclick = () => {
+        document.querySelector('#results').innerHTML = '<table><thead><tr><th>共成功识别1条</th></tr></thead><tbody><tr><td><a href="https://www.douyin.com/video/123">recognized</a></td></tr></tbody></table>';
+        const note = document.createElement('div'); note.textContent = '失败 1 条下载查看'; document.body.appendChild(note);
+      };
+    });
+    const partial = await prepareForm(page, twoLinkJob, identity, { identityStep: false, timeout: 1500 });
+    assert.equal(partial.recognition.complete, false, 'A dropped link must not abort the batch');
+    assert.deepEqual(partial.recognition.recognizedIds, ['123']);
+    assert.deepEqual(partial.recognition.skippedIds, ['999']);
+    assert.equal(await page.evaluate(() => window.clicks), 0, 'Partial recognition must not submit by itself');
+    // Nothing recognized at all still stops: there is nothing to report.
+    await page.setContent(mockForm(true));
+    await page.evaluate(() => {
+      document.querySelector('#recognize').onclick = () => {
+        document.querySelector('#results').innerHTML = '<table><thead><tr><th>共成功识别0条</th></tr></thead><tbody></tbody></table>';
+        const note = document.createElement('div'); note.textContent = '失败 2 条下载查看'; document.body.appendChild(note);
+      };
+    });
+    await assert.rejects(prepareForm(page, twoLinkJob, identity, { identityStep: false, timeout: 1200 }),
+      error => error.code === 'RECOGNITION_UNVERIFIED');
+    console.log(JSON.stringify({ status: 'tests_passed', tests: ['manifest_hash_check', 'duplicate_submission_guard', 'failed_retry_guard', 'mock_form_prepare_without_submit', 'scoped_file_upload', 'recognized_video_ids', 'explicit_failure', 'static_notice_not_failure', 'explicit_success', 'ambiguous_input_stop', 'ambiguous_section_stop', 'default_category_login', 'rich_text_multiline_readback', 'default_to_patent', 'default_to_trademark', 'unchanged_category_stop', 'ambiguous_editor_stop', 'receipt_columns', 'partial_recognition_keeps_survivors', 'no_recognition_stops'], live_requests: 0 }));
   } finally { if (browser) await browser.close(); await fs.rm(root, { recursive: true, force: true }); }
 }
 
